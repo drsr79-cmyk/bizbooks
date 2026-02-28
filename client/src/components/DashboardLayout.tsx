@@ -4,6 +4,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -21,21 +22,31 @@ import {
 } from "@/components/ui/sidebar";
 import { getLoginUrl } from "@/const";
 import { useIsMobile } from "@/hooks/useMobile";
-import { LayoutDashboard, LogOut, PanelLeft, Users } from "lucide-react";
+import { useCompany } from "@/contexts/CompanyContext";
+import {
+  LayoutDashboard, LogOut, PanelLeft, FileText, CreditCard, TrendingUp,
+  BarChart3, MessageSquare, Building2, Receipt, ChevronDown, CheckCircle2
+} from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from './DashboardLayoutSkeleton';
 import { Button } from "./ui/button";
 
 const menuItems = [
-  { icon: LayoutDashboard, label: "Page 1", path: "/" },
-  { icon: Users, label: "Page 2", path: "/some-path" },
+  { icon: LayoutDashboard, label: "Dashboard", path: "/dashboard" },
+  { icon: Receipt, label: "Documents", path: "/documents" },
+  { icon: CreditCard, label: "Bank Statements", path: "/bank-statements" },
+  { icon: FileText, label: "Transactions", path: "/transactions" },
+  { icon: TrendingUp, label: "Income Statement", path: "/income-statement" },
+  { icon: BarChart3, label: "Financial Reports", path: "/financials" },
+  { icon: MessageSquare, label: "AI Advisors", path: "/advisors" },
+  { icon: Building2, label: "Companies", path: "/companies" },
 ];
 
 const SIDEBAR_WIDTH_KEY = "sidebar-width";
-const DEFAULT_WIDTH = 280;
+const DEFAULT_WIDTH = 260;
 const MIN_WIDTH = 200;
-const MAX_WIDTH = 480;
+const MAX_WIDTH = 400;
 
 export default function DashboardLayout({
   children,
@@ -62,10 +73,10 @@ export default function DashboardLayout({
         <div className="flex flex-col items-center gap-8 p-8 max-w-md w-full">
           <div className="flex flex-col items-center gap-6">
             <h1 className="text-2xl font-semibold tracking-tight text-center">
-              Sign in to continue
+              Sign in to BizBooks
             </h1>
             <p className="text-sm text-muted-foreground text-center max-w-sm">
-              Access to this dashboard requires authentication. Continue to launch the login flow.
+              Access your accounting dashboard by signing in.
             </p>
           </div>
           <Button
@@ -114,6 +125,7 @@ function DashboardLayoutContent({
   const sidebarRef = useRef<HTMLDivElement>(null);
   const activeMenuItem = menuItems.find(item => item.path === location);
   const isMobile = useIsMobile();
+  const { companies, activeCompany, setActiveCompanyId } = useCompany();
 
   useEffect(() => {
     if (isCollapsed) {
@@ -124,7 +136,6 @@ function DashboardLayoutContent({
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (!isResizing) return;
-
       const sidebarLeft = sidebarRef.current?.getBoundingClientRect().left ?? 0;
       const newWidth = e.clientX - sidebarLeft;
       if (newWidth >= MIN_WIDTH && newWidth <= MAX_WIDTH) {
@@ -159,7 +170,7 @@ function DashboardLayoutContent({
           className="border-r-0"
           disableTransition={isResizing}
         >
-          <SidebarHeader className="h-16 justify-center">
+          <SidebarHeader className="h-auto justify-center py-3">
             <div className="flex items-center gap-3 px-2 transition-all w-full">
               <button
                 onClick={toggleSidebar}
@@ -170,12 +181,42 @@ function DashboardLayoutContent({
               </button>
               {!isCollapsed ? (
                 <div className="flex items-center gap-2 min-w-0">
-                  <span className="font-semibold tracking-tight truncate">
-                    Navigation
+                  <span className="font-bold tracking-tight truncate text-primary">
+                    BizBooks
                   </span>
                 </div>
               ) : null}
             </div>
+
+            {/* Company Switcher */}
+            {!isCollapsed && companies.length > 0 && (
+              <div className="px-2 mt-2">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button className="w-full flex items-center gap-2 px-2 py-2 rounded-lg bg-muted/50 hover:bg-muted transition-colors text-left text-sm">
+                      <Building2 className="w-4 h-4 text-primary shrink-0" />
+                      <span className="truncate flex-1 font-medium">{activeCompany?.name ?? "Select company"}</span>
+                      <ChevronDown className="w-3 h-3 text-muted-foreground shrink-0" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="w-56">
+                    {companies.map(c => (
+                      <DropdownMenuItem key={c.id} onClick={() => setActiveCompanyId(c.id)} className="cursor-pointer">
+                        <div className="flex items-center gap-2 w-full">
+                          <span className="truncate flex-1">{c.name}</span>
+                          {activeCompany?.id === c.id && <CheckCircle2 className="w-3 h-3 text-primary shrink-0" />}
+                        </div>
+                      </DropdownMenuItem>
+                    ))}
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={() => setLocation("/companies")} className="cursor-pointer">
+                      <Building2 className="w-4 h-4 mr-2" />
+                      Manage Companies
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            )}
           </SidebarHeader>
 
           <SidebarContent className="gap-0">
@@ -250,14 +291,14 @@ function DashboardLayoutContent({
               <div className="flex items-center gap-3">
                 <div className="flex flex-col gap-1">
                   <span className="tracking-tight text-foreground">
-                    {activeMenuItem?.label ?? "Menu"}
+                    {activeMenuItem?.label ?? "BizBooks"}
                   </span>
                 </div>
               </div>
             </div>
           </div>
         )}
-        <main className="flex-1 p-4">{children}</main>
+        <main className="flex-1 p-4 md:p-6">{children}</main>
       </SidebarInset>
     </>
   );

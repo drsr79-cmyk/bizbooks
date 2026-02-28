@@ -1,22 +1,16 @@
-import { int, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
+import { int, mysqlEnum, mysqlTable, text, timestamp, varchar, decimal, bigint, json, boolean } from "drizzle-orm/mysql-core";
 
-/**
- * Core user table backing auth flow.
- * Extend this file with additional tables as your product grows.
- * Columns use camelCase to match both database fields and generated types.
- */
+// ─── Users ───────────────────────────────────────────────────────────
 export const users = mysqlTable("users", {
-  /**
-   * Surrogate primary key. Auto-incremented numeric value managed by the database.
-   * Use this for relations between tables.
-   */
   id: int("id").autoincrement().primaryKey(),
-  /** Manus OAuth identifier (openId) returned from the OAuth callback. Unique per user. */
   openId: varchar("openId", { length: 64 }).notNull().unique(),
   name: text("name"),
   email: varchar("email", { length: 320 }),
   loginMethod: varchar("loginMethod", { length: 64 }),
   role: mysqlEnum("role", ["user", "admin"]).default("user").notNull(),
+  icNumber: varchar("icNumber", { length: 20 }),
+  phone: varchar("phone", { length: 20 }),
+  onboarded: boolean("onboarded").default(false).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
@@ -25,4 +19,159 @@ export const users = mysqlTable("users", {
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 
-// TODO: Add your tables here
+// ─── Companies ───────────────────────────────────────────────────────
+export const companies = mysqlTable("companies", {
+  id: int("id").autoincrement().primaryKey(),
+  name: varchar("name", { length: 255 }).notNull(),
+  companyType: mysqlEnum("companyType", ["enterprise", "plt", "sdn_bhd", "bhd"]).notNull(),
+  ssmNumber: varchar("ssmNumber", { length: 50 }).notNull(),
+  taxNumber: varchar("taxNumber", { length: 50 }),
+  ownerName: varchar("ownerName", { length: 255 }),
+  ownerIc: varchar("ownerIc", { length: 20 }),
+  address: text("address"),
+  financialYearEnd: varchar("financialYearEnd", { length: 5 }), // MM-DD
+  currency: varchar("currency", { length: 3 }).default("MYR").notNull(),
+  createdBy: int("createdBy").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type Company = typeof companies.$inferSelect;
+export type InsertCompany = typeof companies.$inferInsert;
+
+// ─── Company Members (role-based access) ─────────────────────────────
+export const companyMembers = mysqlTable("company_members", {
+  id: int("id").autoincrement().primaryKey(),
+  companyId: int("companyId").notNull(),
+  userId: int("userId").notNull(),
+  memberRole: mysqlEnum("memberRole", ["owner", "staff"]).notNull(),
+  permissions: json("permissions"), // JSON array of permission strings
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type CompanyMember = typeof companyMembers.$inferSelect;
+export type InsertCompanyMember = typeof companyMembers.$inferInsert;
+
+// ─── Chart of Accounts ──────────────────────────────────────────────
+export const chartOfAccounts = mysqlTable("chart_of_accounts", {
+  id: int("id").autoincrement().primaryKey(),
+  companyId: int("companyId").notNull(),
+  code: varchar("code", { length: 20 }).notNull(),
+  name: varchar("name", { length: 255 }).notNull(),
+  accountType: mysqlEnum("accountType", [
+    "asset", "liability", "equity", "revenue", "expense"
+  ]).notNull(),
+  subType: varchar("subType", { length: 100 }),
+  parentId: int("parentId"),
+  isDefault: boolean("isDefault").default(false).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type ChartOfAccount = typeof chartOfAccounts.$inferSelect;
+
+// ─── Documents (receipts, invoices, bank statements, etc.) ──────────
+export const documents = mysqlTable("documents", {
+  id: int("id").autoincrement().primaryKey(),
+  companyId: int("companyId").notNull(),
+  uploadedBy: int("uploadedBy").notNull(),
+  docType: mysqlEnum("docType", [
+    "receipt", "invoice", "bank_statement", "credit_card_statement", "income_statement", "other"
+  ]).notNull(),
+  fileName: varchar("fileName", { length: 500 }).notNull(),
+  fileUrl: text("fileUrl").notNull(),
+  fileKey: varchar("fileKey", { length: 500 }).notNull(),
+  mimeType: varchar("mimeType", { length: 100 }),
+  ocrText: text("ocrText"),
+  ocrData: json("ocrData"), // structured OCR result
+  status: mysqlEnum("status", ["pending", "processing", "processed", "error", "needs_clarification"]).default("pending").notNull(),
+  clarificationNote: text("clarificationNote"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type Document = typeof documents.$inferSelect;
+export type InsertDocument = typeof documents.$inferInsert;
+
+// ─── Transactions (from bank/credit card statements + manual) ───────
+export const transactions = mysqlTable("transactions", {
+  id: int("id").autoincrement().primaryKey(),
+  companyId: int("companyId").notNull(),
+  documentId: int("documentId"),
+  date: timestamp("date").notNull(),
+  description: text("description").notNull(),
+  amount: decimal("amount", { precision: 15, scale: 2 }).notNull(),
+  transactionType: mysqlEnum("transactionType", ["debit", "credit"]).notNull(),
+  category: varchar("category", { length: 255 }),
+  accountId: int("accountId"), // FK to chart_of_accounts
+  autoCategory: varchar("autoCategory", { length: 255 }),
+  autoCategoryConfidence: decimal("autoCategoryConfidence", { precision: 5, scale: 2 }),
+  manualOverride: boolean("manualOverride").default(false).notNull(),
+  notes: text("notes"),
+  reference: varchar("reference", { length: 255 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type Transaction = typeof transactions.$inferSelect;
+export type InsertTransaction = typeof transactions.$inferInsert;
+
+// ─── Journal Entries ─────────────────────────────────────────────────
+export const journalEntries = mysqlTable("journal_entries", {
+  id: int("id").autoincrement().primaryKey(),
+  companyId: int("companyId").notNull(),
+  transactionId: int("transactionId"),
+  date: timestamp("date").notNull(),
+  description: text("description"),
+  accountId: int("accountId").notNull(),
+  debit: decimal("debit", { precision: 15, scale: 2 }).default("0").notNull(),
+  credit: decimal("credit", { precision: 15, scale: 2 }).default("0").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type JournalEntry = typeof journalEntries.$inferSelect;
+
+// ─── Income Statement Lines (manual input) ──────────────────────────
+export const incomeStatementLines = mysqlTable("income_statement_lines", {
+  id: int("id").autoincrement().primaryKey(),
+  companyId: int("companyId").notNull(),
+  documentId: int("documentId"),
+  period: varchar("period", { length: 20 }).notNull(), // e.g. "2025-01" or "2025-Q1"
+  lineType: mysqlEnum("lineType", ["revenue", "cost_of_goods", "operating_expense", "other_income", "other_expense", "tax"]).notNull(),
+  description: varchar("description", { length: 500 }).notNull(),
+  amount: decimal("amount", { precision: 15, scale: 2 }).notNull(),
+  accountId: int("accountId"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type IncomeStatementLine = typeof incomeStatementLines.$inferSelect;
+
+// ─── Financial Snapshots (generated statements) ─────────────────────
+export const financialSnapshots = mysqlTable("financial_snapshots", {
+  id: int("id").autoincrement().primaryKey(),
+  companyId: int("companyId").notNull(),
+  statementType: mysqlEnum("statementType", ["profit_loss", "balance_sheet", "cash_flow"]).notNull(),
+  period: varchar("period", { length: 20 }).notNull(),
+  data: json("data").notNull(), // full statement JSON
+  generatedBy: int("generatedBy").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type FinancialSnapshot = typeof financialSnapshots.$inferSelect;
+
+// ─── AI Advisor Conversations ────────────────────────────────────────
+export const advisorConversations = mysqlTable("advisor_conversations", {
+  id: int("id").autoincrement().primaryKey(),
+  companyId: int("companyId").notNull(),
+  userId: int("userId").notNull(),
+  advisorType: mysqlEnum("advisorType", [
+    "bookkeeper", "accountant", "tax_agent", "auditor", "cfo"
+  ]).notNull(),
+  title: varchar("title", { length: 255 }),
+  messages: json("messages").notNull(), // Array of {role, content, timestamp}
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type AdvisorConversation = typeof advisorConversations.$inferSelect;
+export type InsertAdvisorConversation = typeof advisorConversations.$inferInsert;
