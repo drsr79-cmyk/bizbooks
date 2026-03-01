@@ -168,11 +168,11 @@ export default function Companies() {
               <CardContent>
                 <div className="grid grid-cols-2 gap-2 text-sm">
                   <div>
-                    <p className="text-muted-foreground text-xs">SSM Number</p>
-                    <p className="font-mono">{company.ssmNumber}</p>
+                    <span className="text-muted-foreground text-xs block">SSM Number</span>
+                    <span className="font-mono block">{company.ssmNumber}</span>
                   </div>
                   <div>
-                    <p className="text-muted-foreground text-xs">Your Role</p>
+                    <span className="text-muted-foreground text-xs block">Your Role</span>
                     <Badge variant="outline" className="capitalize">{company.memberRole}</Badge>
                   </div>
                 </div>

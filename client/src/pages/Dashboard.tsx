@@ -85,7 +85,7 @@ export default function Dashboard() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">Receipts</p>
-                <p className="text-2xl font-bold mt-1">{docsLoading ? <Skeleton className="h-8 w-12" /> : receiptCount}</p>
+                <span className="text-2xl font-bold mt-1 block">{docsLoading ? <Skeleton className="h-8 w-12" /> : receiptCount}</span>
               </div>
               <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
                 <Receipt className="w-5 h-5 text-primary" />
@@ -99,7 +99,7 @@ export default function Dashboard() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">Invoices</p>
-                <p className="text-2xl font-bold mt-1">{docsLoading ? <Skeleton className="h-8 w-12" /> : invoiceCount}</p>
+                <span className="text-2xl font-bold mt-1 block">{docsLoading ? <Skeleton className="h-8 w-12" /> : invoiceCount}</span>
               </div>
               <div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center">
                 <FileText className="w-5 h-5 text-blue-500" />
@@ -113,9 +113,9 @@ export default function Dashboard() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">Total Inflow</p>
-                <p className="text-2xl font-bold mt-1 text-green-600">
+                <span className="text-2xl font-bold mt-1 text-green-600 block">
                   {txnLoading ? <Skeleton className="h-8 w-20" /> : `RM ${totalCredits.toLocaleString("en-MY", { minimumFractionDigits: 2 })}`}
-                </p>
+                </span>
               </div>
               <div className="w-10 h-10 rounded-lg bg-green-500/10 flex items-center justify-center">
                 <ArrowUpRight className="w-5 h-5 text-green-500" />
@@ -129,9 +129,9 @@ export default function Dashboard() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">Total Outflow</p>
-                <p className="text-2xl font-bold mt-1 text-red-500">
+                <span className="text-2xl font-bold mt-1 text-red-500 block">
                   {txnLoading ? <Skeleton className="h-8 w-20" /> : `RM ${totalDebits.toLocaleString("en-MY", { minimumFractionDigits: 2 })}`}
-                </p>
+                </span>
               </div>
               <div className="w-10 h-10 rounded-lg bg-red-500/10 flex items-center justify-center">
                 <ArrowDownRight className="w-5 h-5 text-red-500" />

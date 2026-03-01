@@ -48,3 +48,6 @@
 - [x] LLM integration for OCR and categorization
 - [x] File upload to S3 storage
 - [x] Vitest tests for critical paths
+
+## Bug Fixes
+- [x] Fix HTML nesting error on /companies page: <p> cannot contain nested <div>
