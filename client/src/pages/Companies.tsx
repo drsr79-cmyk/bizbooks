@@ -61,11 +61,10 @@ export default function Companies() {
         taxNumber: taxNumber || undefined,
         ownerName: ownerName || undefined,
         ownerIc: ownerIc || undefined,
-        address: address || undefined,
       });
       toast.success("Company registered successfully");
       setAddOpen(false);
-      setCompanyName(""); setCompanyType(""); setSsmNumber(""); setTaxNumber(""); setOwnerName(""); setOwnerIc(""); setAddress("");
+      setCompanyName(""); setCompanyType(""); setSsmNumber(""); setTaxNumber(""); setOwnerName(""); setOwnerIc("");
       await utils.company.list.invalidate();
       setActiveCompanyId(result.id);
     } catch (e: any) {

@@ -73,3 +73,11 @@
 - [x] Frontend: Add delete button on transactions with confirmation
 - [x] Backend: Fix document upload auto-categorization - ensure LLM is called to categorize uploaded documents
 - [x] Frontend: Show categorization status on uploaded documents
+
+## Auto-Categorization Fix
+- [x] Backend: Fix auto-categorization to trigger on ALL document uploads (not just images/PDFs)
+- [x] Backend: For non-image files (CSV, Excel, text), parse content server-side and send to LLM
+- [x] Backend: Integrate bookkeeper advisor to ask clarification questions when categorization is unclear
+- [x] Frontend: Show real-time categorization progress on uploaded documents
+- [x] Frontend: Show bookkeeper clarification questions inline on documents page
+- [x] Frontend: Allow user to respond to bookkeeper questions and re-categorize

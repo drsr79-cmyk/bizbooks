@@ -78,7 +78,6 @@ export default function Onboarding() {
         taxNumber: taxNumber || undefined,
         ownerName: ownerName || undefined,
         ownerIc: ownerIc || undefined,
-        address: address || undefined,
       });
       await handleCompleteOnboarding();
     } catch (e: any) {

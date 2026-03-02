@@ -65,19 +65,9 @@ const companyRouter = router({
       taxNumber: z.string().optional(),
       ownerName: z.string().optional(),
       ownerIc: z.string().optional(),
-      address: z.string().optional(),
-      financialYearEnd: z.string().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
-      const companyId = await db.createCompany({
-        ...input,
-        taxNumber: input.taxNumber,
-        ownerName: input.ownerName,
-        ownerIc: input.ownerIc,
-        address: input.address,
-        financialYearEnd: input.financialYearEnd,
-        createdBy: ctx.user.id,
-      });
+      const companyId = await db.createCompany({ ...input, createdBy: ctx.user.id });
       await db.addCompanyMember({
         companyId,
         userId: ctx.user.id,
@@ -93,7 +83,7 @@ const companyRouter = router({
     .input(z.object({ companyId: z.number() }))
     .query(async ({ ctx, input }) => {
       const role = await db.getMemberRole(input.companyId, ctx.user.id);
-      if (!role) throw new TRPCError({ code: "FORBIDDEN", message: "Not a member of this company" });
+      if (!role) throw new TRPCError({ code: "FORBIDDEN" });
       return db.getCompanyMembers(input.companyId);
     }),
 
@@ -102,18 +92,15 @@ const companyRouter = router({
       companyId: z.number(),
       userEmail: z.string().email(),
       memberRole: z.enum(["owner", "staff"]),
-      accessLevel: z.enum(["full", "limited"]).default("full"),
+      accessLevel: z.enum(["full", "limited"]),
     }))
     .mutation(async ({ ctx, input }) => {
-      // Only owners can add members
       const callerRole = await db.getMemberRole(input.companyId, ctx.user.id);
       if (callerRole !== "owner") throw new TRPCError({ code: "FORBIDDEN", message: "Only owners can add members" });
 
-      // Find user by email
       const targetUser = await db.getUserByEmail(input.userEmail);
       if (!targetUser) throw new TRPCError({ code: "NOT_FOUND", message: "No user found with that email. They must sign up first." });
 
-      // Check if already a member
       const existing = await db.getMemberByCompanyAndUser(input.companyId, targetUser.id);
       if (existing) throw new TRPCError({ code: "CONFLICT", message: "This user is already a member of the company" });
 
@@ -198,19 +185,10 @@ const documentRouter = router({
         status: "processing",
       });
 
-      // Auto-categorize: trigger OCR + categorization in background
-      const isImage = input.mimeType.startsWith("image/");
-      const isPdf = input.mimeType === "application/pdf";
-
-      if (isImage || isPdf) {
-        // Fire-and-forget: process document with LLM
-        processDocumentAsync(docId, url, input.docType, input.fileName, input.companyId).catch(err => {
-          console.error("[AutoCategorize] Error:", err);
-        });
-      } else {
-        // Non-image/pdf files: mark as pending for manual processing
-        await db.updateDocument(docId, { status: "pending" });
-      }
+      // Fire-and-forget: auto-categorize ALL uploaded documents
+      processDocumentAsync(docId, url, input.docType, input.fileName, input.companyId, input.mimeType).catch(err => {
+        console.error("[AutoCategorize] Error:", err);
+      });
 
       return { id: docId, url };
     }),
@@ -222,7 +200,7 @@ const documentRouter = router({
     }))
     .query(async ({ ctx, input }) => {
       const role = await db.getMemberRole(input.companyId, ctx.user.id);
-      if (!role) throw new TRPCError({ code: "FORBIDDEN", message: "You do not have access to this company" });
+      if (!role) throw new TRPCError({ code: "FORBIDDEN" });
       return db.getDocuments(input.companyId, input.docType);
     }),
 
@@ -241,17 +219,18 @@ const documentRouter = router({
       await db.updateDocument(doc.id, { status: "processing" });
 
       try {
-        const ocrData = await extractDocumentData(doc.fileUrl, doc.docType, doc.fileName);
+        const ocrData = await extractDocumentData(doc.fileUrl, doc.docType, doc.fileName, doc.mimeType ?? "application/octet-stream");
         const needsClarification = ocrData?.clarificationNeeded?.length > 0;
 
         await db.updateDocument(doc.id, {
           ocrText: ocrData?.extractedText ?? "",
           ocrData: ocrData,
           status: needsClarification ? "needs_clarification" : "processed",
-          clarificationNote: needsClarification ? ocrData.clarificationNeeded.join("; ") : null,
+          clarificationNote: needsClarification
+            ? formatBookkeeperClarification(ocrData.clarificationNeeded, doc.fileName)
+            : null,
         });
 
-        // Auto-create transaction if total is detected
         if (ocrData?.total && ocrData.total > 0) {
           await db.createTransaction({
             companyId: doc.companyId,
@@ -279,29 +258,134 @@ const documentRouter = router({
       response: z.string(),
     }))
     .mutation(async ({ input }) => {
-      await db.updateDocument(input.documentId, {
-        status: "processed",
-        clarificationNote: `User response: ${input.response}`,
-      });
-      return { success: true };
+      const doc = await db.getDocumentById(input.documentId);
+      if (!doc) throw new TRPCError({ code: "NOT_FOUND" });
+
+      // Re-process with the user's clarification
+      await db.updateDocument(input.documentId, { status: "processing" });
+
+      try {
+        // Delete any previously auto-created transactions for this document
+        await db.deleteTransactionsByDocumentId(input.documentId);
+
+        const result = await reCategorizeWithClarification(doc, input.response);
+        const needsClarification = result?.clarificationNeeded?.length > 0;
+
+        await db.updateDocument(input.documentId, {
+          ocrText: result?.extractedText ?? (doc.ocrText || ""),
+          ocrData: result,
+          status: needsClarification ? "needs_clarification" : "processed",
+          clarificationNote: needsClarification
+            ? formatBookkeeperClarification(result.clarificationNeeded, doc.fileName)
+            : `Clarified and processed. User response: ${input.response}`,
+        });
+
+        // Create transaction from clarified data
+        if (result?.total && result.total > 0) {
+          await db.createTransaction({
+            companyId: doc.companyId,
+            documentId: doc.id,
+            date: result.date ? new Date(result.date) : new Date(),
+            description: result.vendor || doc.fileName,
+            amount: result.total.toFixed(2),
+            transactionType: doc.docType === "invoice" ? "credit" : "debit",
+            category: result.suggestedCategory || "Miscellaneous Expenses",
+            autoCategory: result.suggestedCategory || null,
+            manualOverride: false,
+          });
+        }
+
+        // Also create transactions from individual items if it's a statement
+        if (result?.transactions && result.transactions.length > 0) {
+          const txData = result.transactions.map((tx: any) => ({
+            companyId: doc.companyId,
+            documentId: doc.id,
+            date: tx.date ? new Date(tx.date) : new Date(),
+            description: tx.description,
+            amount: Math.abs(tx.amount).toFixed(2),
+            transactionType: tx.type as "debit" | "credit",
+            category: tx.category,
+            autoCategory: tx.category,
+            autoCategoryConfidence: (tx.confidence ?? 80).toFixed(2),
+            manualOverride: false,
+          }));
+          if (txData.length > 0) {
+            await db.createTransactionsBatch(txData);
+          }
+        }
+
+        return { success: true };
+      } catch (err: any) {
+        await db.updateDocument(input.documentId, {
+          status: "error",
+          clarificationNote: `Re-processing failed: ${err.message}`,
+        });
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Re-processing failed" });
+      }
     }),
 });
 
+// ─── Bookkeeper Clarification Formatter ─────────────────────────────
+function formatBookkeeperClarification(issues: string[], fileName: string): string {
+  const intro = `Hi there! I'm Sarah, your bookkeeper. I've been going through "${fileName}" and I need a bit of help to make sure everything is recorded correctly.\n\n`;
+  const questions = issues.map((issue, i) => `${i + 1}. ${issue}`).join("\n");
+  const outro = "\n\nCould you please clarify these for me? I want to make sure your books are spot-on! 📋";
+  return intro + questions + outro;
+}
+
 // ─── Auto-categorization helper (fire-and-forget) ───────────────────
-async function extractDocumentData(fileUrl: string, docType: string, fileName: string) {
-  const messages: any[] = [
-    {
-      role: "system",
-      content: `You are an OCR and document analysis expert for Malaysian businesses. Extract all text and structured data from the uploaded document. Return a JSON object with: { "extractedText": "full text", "vendor": "vendor name if receipt/invoice", "date": "YYYY-MM-DD", "total": number, "currency": "MYR", "items": [{"description": "item", "amount": number}], "taxAmount": number, "invoiceNumber": "if applicable", "documentType": "receipt|invoice|statement", "suggestedCategory": "best category from: Sales Revenue, Service Revenue, Cost of Goods Sold, Salaries & Wages, Rent & Utilities, Office Supplies, Marketing & Advertising, Professional Fees, Travel & Entertainment, Miscellaneous Expenses", "clarificationNeeded": [] }. If any field is unclear, set it to null and add a description to "clarificationNeeded" array.`
-    },
-    {
+async function extractDocumentData(fileUrl: string, docType: string, fileName: string, mimeType: string) {
+  const isImage = mimeType.startsWith("image/");
+  const isPdf = mimeType === "application/pdf";
+  const isText = mimeType.startsWith("text/") || mimeType === "application/csv" || fileName.endsWith(".csv") || fileName.endsWith(".txt");
+
+  const systemPrompt = `You are Sarah, a Senior Bookkeeper and OCR/document analysis expert for Malaysian businesses. Extract all text and structured data from the uploaded document. You are meticulous and thorough.
+
+For receipts and invoices, return:
+{ "extractedText": "full text", "vendor": "vendor name", "date": "YYYY-MM-DD", "total": number, "currency": "MYR", "items": [{"description": "item", "amount": number}], "taxAmount": number, "invoiceNumber": "if applicable", "documentType": "receipt|invoice|statement", "suggestedCategory": "best category from: Sales Revenue, Service Revenue, Cost of Goods Sold, Salaries & Wages, Rent & Utilities, Office Supplies, Marketing & Advertising, Professional Fees, Travel & Entertainment, Insurance, Depreciation, Interest Expense, Bank Charges, Tax Payment, Miscellaneous Expenses, Other Income, Other Expense", "clarificationNeeded": [], "transactions": null }
+
+For bank/credit card statements, extract EVERY transaction line and return:
+{ "extractedText": "summary", "vendor": null, "date": null, "total": null, "currency": "MYR", "items": [], "taxAmount": null, "invoiceNumber": null, "documentType": "statement", "suggestedCategory": null, "clarificationNeeded": [], "transactions": [{"date": "YYYY-MM-DD", "description": "original description", "amount": number (positive), "type": "debit|credit", "category": "best category", "confidence": 0-100}] }
+
+IMPORTANT RULES:
+- If any field is unclear, blurry, or ambiguous, set it to null and add a SPECIFIC question to "clarificationNeeded" array
+- Be specific in your questions, e.g. "The receipt shows RM450 but the vendor name is unclear. Could you confirm who this payment was made to?"
+- For statements, if a transaction description is ambiguous, still categorize it with your best guess but set confidence below 60 and add to clarificationNeeded
+- Always extract the FULL text content you can read
+- For Malaysian receipts, look for SST registration numbers, tax invoice numbers, and GST/SST amounts`;
+
+  const messages: any[] = [{ role: "system", content: systemPrompt }];
+
+  if (isImage) {
+    messages.push({
       role: "user",
       content: [
-        { type: "text", text: `Please extract and analyse this ${docType} document: ${fileName}` },
+        { type: "text", text: `Please extract and categorize this ${docType} document: ${fileName}` },
         { type: "image_url", image_url: { url: fileUrl, detail: "high" } }
       ]
+    });
+  } else if (isPdf) {
+    messages.push({
+      role: "user",
+      content: [
+        { type: "text", text: `Please extract and categorize this ${docType} document: ${fileName}` },
+        { type: "file_url", file_url: { url: fileUrl, mime_type: "application/pdf" } }
+      ]
+    });
+  } else {
+    // For text/CSV files, fetch the content and send as text
+    let textContent = "";
+    try {
+      const response = await fetch(fileUrl);
+      textContent = await response.text();
+    } catch (e) {
+      textContent = "[Could not read file content]";
     }
-  ];
+    messages.push({
+      role: "user",
+      content: `Please extract and categorize this ${docType} document: ${fileName}\n\nFile content:\n${textContent.slice(0, 15000)}`
+    });
+  }
 
   const result = await invokeLLM({
     messages,
@@ -337,9 +421,25 @@ async function extractDocumentData(fileUrl: string, docType: string, fileName: s
             clarificationNeeded: {
               type: "array",
               items: { type: "string" }
+            },
+            transactions: {
+              type: ["array", "null"],
+              items: {
+                type: "object",
+                properties: {
+                  date: { type: "string" },
+                  description: { type: "string" },
+                  amount: { type: "number" },
+                  type: { type: "string" },
+                  category: { type: "string" },
+                  confidence: { type: "number" }
+                },
+                required: ["date", "description", "amount", "type", "category", "confidence"],
+                additionalProperties: false,
+              }
             }
           },
-          required: ["extractedText", "vendor", "date", "total", "currency", "items", "taxAmount", "invoiceNumber", "documentType", "suggestedCategory", "clarificationNeeded"],
+          required: ["extractedText", "vendor", "date", "total", "currency", "items", "taxAmount", "invoiceNumber", "documentType", "suggestedCategory", "clarificationNeeded", "transactions"],
           additionalProperties: false,
         }
       }
@@ -350,20 +450,124 @@ async function extractDocumentData(fileUrl: string, docType: string, fileName: s
   return typeof content === "string" ? JSON.parse(content) : null;
 }
 
-async function processDocumentAsync(docId: number, fileUrl: string, docType: string, fileName: string, companyId: number) {
+async function reCategorizeWithClarification(doc: any, userResponse: string) {
+  const previousData = doc.ocrData as any;
+  const isImage = (doc.mimeType ?? "").startsWith("image/");
+  const isPdf = (doc.mimeType ?? "") === "application/pdf";
+
+  const systemPrompt = `You are Sarah, a Senior Bookkeeper. You previously analyzed a document and had some questions. The user has now provided clarification. Please re-analyze and provide the complete categorized data.
+
+Previous analysis: ${JSON.stringify(previousData)}
+Previous questions: ${doc.clarificationNote}
+User's clarification: ${userResponse}
+
+Now provide the complete, corrected analysis in the same JSON format. If you still have questions, add them to clarificationNeeded. Otherwise, leave clarificationNeeded as an empty array.`;
+
+  const messages: any[] = [{ role: "system", content: systemPrompt }];
+
+  if (isImage) {
+    messages.push({
+      role: "user",
+      content: [
+        { type: "text", text: `Re-analyze with clarification: ${userResponse}` },
+        { type: "image_url", image_url: { url: doc.fileUrl, detail: "high" } }
+      ]
+    });
+  } else if (isPdf) {
+    messages.push({
+      role: "user",
+      content: [
+        { type: "text", text: `Re-analyze with clarification: ${userResponse}` },
+        { type: "file_url", file_url: { url: doc.fileUrl, mime_type: "application/pdf" } }
+      ]
+    });
+  } else {
+    messages.push({
+      role: "user",
+      content: `Re-analyze with clarification: ${userResponse}`
+    });
+  }
+
+  const result = await invokeLLM({
+    messages,
+    response_format: {
+      type: "json_schema",
+      json_schema: {
+        name: "ocr_result",
+        strict: true,
+        schema: {
+          type: "object",
+          properties: {
+            extractedText: { type: "string" },
+            vendor: { type: ["string", "null"] },
+            date: { type: ["string", "null"] },
+            total: { type: ["number", "null"] },
+            currency: { type: "string" },
+            items: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  description: { type: "string" },
+                  amount: { type: "number" }
+                },
+                required: ["description", "amount"],
+                additionalProperties: false,
+              }
+            },
+            taxAmount: { type: ["number", "null"] },
+            invoiceNumber: { type: ["string", "null"] },
+            documentType: { type: "string" },
+            suggestedCategory: { type: ["string", "null"] },
+            clarificationNeeded: {
+              type: "array",
+              items: { type: "string" }
+            },
+            transactions: {
+              type: ["array", "null"],
+              items: {
+                type: "object",
+                properties: {
+                  date: { type: "string" },
+                  description: { type: "string" },
+                  amount: { type: "number" },
+                  type: { type: "string" },
+                  category: { type: "string" },
+                  confidence: { type: "number" }
+                },
+                required: ["date", "description", "amount", "type", "category", "confidence"],
+                additionalProperties: false,
+              }
+            }
+          },
+          required: ["extractedText", "vendor", "date", "total", "currency", "items", "taxAmount", "invoiceNumber", "documentType", "suggestedCategory", "clarificationNeeded", "transactions"],
+          additionalProperties: false,
+        }
+      }
+    }
+  });
+
+  const content = result.choices[0]?.message?.content;
+  return typeof content === "string" ? JSON.parse(content) : null;
+}
+
+async function processDocumentAsync(docId: number, fileUrl: string, docType: string, fileName: string, companyId: number, mimeType: string) {
   try {
-    const ocrData = await extractDocumentData(fileUrl, docType, fileName);
+    console.log(`[AutoCategorize] Processing doc ${docId}: ${fileName} (${mimeType})`);
+    const ocrData = await extractDocumentData(fileUrl, docType, fileName, mimeType);
     const needsClarification = ocrData?.clarificationNeeded?.length > 0;
 
     await db.updateDocument(docId, {
       ocrText: ocrData?.extractedText ?? "",
       ocrData: ocrData,
       status: needsClarification ? "needs_clarification" : "processed",
-      clarificationNote: needsClarification ? ocrData.clarificationNeeded.join("; ") : null,
+      clarificationNote: needsClarification
+        ? formatBookkeeperClarification(ocrData.clarificationNeeded, fileName)
+        : null,
     });
 
-    // Auto-create transaction from extracted data
-    if (ocrData?.total && ocrData.total > 0) {
+    // For receipts/invoices: auto-create a single transaction
+    if ((docType === "receipt" || docType === "invoice" || docType === "other") && ocrData?.total && ocrData.total > 0) {
       await db.createTransaction({
         companyId,
         documentId: docId,
@@ -377,9 +581,28 @@ async function processDocumentAsync(docId: number, fileUrl: string, docType: str
         manualOverride: false,
       });
     }
+
+    // For bank/credit card statements: create multiple transactions from extracted lines
+    if ((docType === "bank_statement" || docType === "credit_card_statement") && ocrData?.transactions && ocrData.transactions.length > 0) {
+      const txData = ocrData.transactions.map((tx: any) => ({
+        companyId,
+        documentId: docId,
+        date: tx.date ? new Date(tx.date) : new Date(),
+        description: tx.description,
+        amount: Math.abs(tx.amount).toFixed(2),
+        transactionType: tx.type as "debit" | "credit",
+        category: tx.category,
+        autoCategory: tx.category,
+        autoCategoryConfidence: (tx.confidence ?? 80).toFixed(2),
+        manualOverride: false,
+      }));
+      await db.createTransactionsBatch(txData);
+    }
+
+    console.log(`[AutoCategorize] Done doc ${docId}: status=${needsClarification ? "needs_clarification" : "processed"}, txns=${ocrData?.transactions?.length ?? (ocrData?.total ? 1 : 0)}`);
   } catch (err: any) {
     console.error("[processDocumentAsync] Failed:", err.message);
-    await db.updateDocument(docId, { status: "error", clarificationNote: err.message });
+    await db.updateDocument(docId, { status: "error", clarificationNote: `Processing failed: ${err.message}. You can retry by clicking the Retry button.` });
   }
 }
 
@@ -401,76 +624,54 @@ const transactionRouter = router({
     .input(z.object({
       companyId: z.number(),
       documentId: z.number(),
-      rawText: z.string(),
+      rawText: z.string().optional(),
     }))
     .mutation(async ({ input }) => {
-      const accounts = await db.getChartOfAccounts(input.companyId);
-      const accountNames = accounts.map(a => `${a.code} - ${a.name} (${a.accountType})`).join("\n");
+      // Get the document to use its file URL for LLM analysis
+      const doc = await db.getDocumentById(input.documentId);
+      if (!doc) throw new TRPCError({ code: "NOT_FOUND", message: "Document not found" });
 
-      const result = await invokeLLM({
-        messages: [
-          {
-            role: "system",
-            content: `You are an expert bookkeeper. Parse the following bank/credit card statement text and categorize each transaction. Available chart of accounts:\n${accountNames}\n\nReturn a JSON array of transactions with: { "transactions": [{ "date": "YYYY-MM-DD", "description": "original description", "amount": number (positive for credits, negative for debits), "type": "debit"|"credit", "category": "best matching category name", "accountCode": "matching account code", "confidence": 0-100 }] }`
-          },
-          { role: "user", content: input.rawText }
-        ],
-        response_format: {
-          type: "json_schema",
-          json_schema: {
-            name: "categorized_transactions",
-            strict: true,
-            schema: {
-              type: "object",
-              properties: {
-                transactions: {
-                  type: "array",
-                  items: {
-                    type: "object",
-                    properties: {
-                      date: { type: "string" },
-                      description: { type: "string" },
-                      amount: { type: "number" },
-                      type: { type: "string", enum: ["debit", "credit"] },
-                      category: { type: "string" },
-                      accountCode: { type: "string" },
-                      confidence: { type: "number" }
-                    },
-                    required: ["date", "description", "amount", "type", "category", "accountCode", "confidence"],
-                    additionalProperties: false,
-                  }
-                }
-              },
-              required: ["transactions"],
-              additionalProperties: false,
-            }
-          }
+      // Delete any existing transactions for this document before re-categorizing
+      await db.deleteTransactionsByDocumentId(input.documentId);
+      await db.updateDocument(input.documentId, { status: "processing" });
+
+      try {
+        const ocrData = await extractDocumentData(doc.fileUrl, doc.docType, doc.fileName, doc.mimeType ?? "application/octet-stream");
+        const needsClarification = ocrData?.clarificationNeeded?.length > 0;
+
+        await db.updateDocument(input.documentId, {
+          ocrText: ocrData?.extractedText ?? "",
+          ocrData: ocrData,
+          status: needsClarification ? "needs_clarification" : "processed",
+          clarificationNote: needsClarification
+            ? formatBookkeeperClarification(ocrData.clarificationNeeded, doc.fileName)
+            : null,
+        });
+
+        // Create transactions from extracted statement lines
+        const txns = ocrData?.transactions ?? [];
+        const txData = txns.map((tx: any) => ({
+          companyId: input.companyId,
+          documentId: input.documentId,
+          date: tx.date ? new Date(tx.date) : new Date(),
+          description: tx.description,
+          amount: Math.abs(tx.amount).toFixed(2),
+          transactionType: tx.type as "debit" | "credit",
+          category: tx.category,
+          autoCategory: tx.category,
+          autoCategoryConfidence: (tx.confidence ?? 80).toFixed(2),
+          manualOverride: false,
+        }));
+
+        if (txData.length > 0) {
+          await db.createTransactionsBatch(txData);
         }
-      });
 
-      const content = result.choices[0]?.message?.content;
-      const parsed = typeof content === "string" ? JSON.parse(content) : { transactions: [] };
-
-      const txData = parsed.transactions.map((tx: any) => ({
-        companyId: input.companyId,
-        documentId: input.documentId,
-        date: new Date(tx.date),
-        description: tx.description,
-        amount: Math.abs(tx.amount).toFixed(2),
-        transactionType: tx.type as "debit" | "credit",
-        category: tx.category,
-        autoCategory: tx.category,
-        autoCategoryConfidence: tx.confidence.toFixed(2),
-        manualOverride: false,
-      }));
-
-      if (txData.length > 0) {
-        await db.createTransactionsBatch(txData);
+        return { transactions: txns, count: txns.length, needsClarification };
+      } catch (err: any) {
+        await db.updateDocument(input.documentId, { status: "error", clarificationNote: err.message });
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Statement processing failed" });
       }
-
-      await db.updateDocument(input.documentId, { status: "processed" });
-
-      return { transactions: parsed.transactions, count: parsed.transactions.length };
     }),
 
   updateCategory: protectedProcedure
@@ -534,7 +735,7 @@ const incomeStatementRouter = router({
     }))
     .query(async ({ ctx, input }) => {
       const role = await db.getMemberRole(input.companyId, ctx.user.id);
-      if (role !== "owner") throw new TRPCError({ code: "FORBIDDEN", message: "Only company owners can view income statements" });
+      if (role !== "owner") throw new TRPCError({ code: "FORBIDDEN", message: "Only owners can view income statements" });
       return db.getIncomeStatementLines(input.companyId, input.period);
     }),
 
@@ -543,20 +744,28 @@ const incomeStatementRouter = router({
       companyId: z.number(),
       period: z.string(),
       lineType: z.enum(["revenue", "cost_of_goods", "operating_expense", "other_income", "other_expense", "tax"]),
-      description: z.string(),
+      description: z.string().min(1),
       amount: z.string(),
     }))
     .mutation(async ({ ctx, input }) => {
       const role = await db.getMemberRole(input.companyId, ctx.user.id);
-      if (role !== "owner") throw new TRPCError({ code: "FORBIDDEN", message: "Only company owners can modify income statements" });
-      const id = await db.createIncomeStatementLine(input);
+      if (role !== "owner") throw new TRPCError({ code: "FORBIDDEN" });
+      const id = await db.createIncomeStatementLine({
+        companyId: input.companyId,
+        period: input.period,
+        lineType: input.lineType,
+        description: input.description,
+        amount: input.amount,
+      });
       return { id };
     }),
 
   deleteLine: protectedProcedure
-    .input(z.object({ id: z.number() }))
-    .mutation(async ({ input }) => {
-      await db.deleteIncomeStatementLine(input.id);
+    .input(z.object({ lineId: z.number(), companyId: z.number() }))
+    .mutation(async ({ ctx, input }) => {
+      const role = await db.getMemberRole(input.companyId, ctx.user.id);
+      if (role !== "owner") throw new TRPCError({ code: "FORBIDDEN" });
+      await db.deleteIncomeStatementLine(input.lineId);
       return { success: true };
     }),
 });
@@ -571,35 +780,73 @@ const financialRouter = router({
     }))
     .mutation(async ({ ctx, input }) => {
       const role = await db.getMemberRole(input.companyId, ctx.user.id);
-      if (role !== "owner") throw new TRPCError({ code: "FORBIDDEN", message: "Only company owners can generate financial statements" });
-      const [txns, incomeLines, accounts] = await Promise.all([
-        db.getTransactions(input.companyId, 10000, 0),
+      if (role !== "owner") throw new TRPCError({ code: "FORBIDDEN", message: "Only owners can generate financial statements" });
+
+      const [txns, incomeLines, accounts, company] = await Promise.all([
+        db.getTransactions(input.companyId, 1000, 0),
         db.getIncomeStatementLines(input.companyId, input.period),
         db.getChartOfAccounts(input.companyId),
+        db.getCompanyById(input.companyId),
       ]);
-
-      const prompt = input.statementType === "profit_loss"
-        ? `Generate a Profit & Loss statement for period ${input.period}. Use the following data:\nTransactions: ${JSON.stringify(txns.slice(0, 200))}\nIncome Statement Lines: ${JSON.stringify(incomeLines)}\nChart of Accounts: ${JSON.stringify(accounts)}\n\nReturn JSON: { "title": "Profit & Loss Statement", "period": "${input.period}", "sections": [{ "name": "Revenue", "items": [{"description": "...", "amount": number}], "total": number }, ...], "netProfit": number }`
-        : input.statementType === "balance_sheet"
-        ? `Generate a Balance Sheet for period ${input.period}. Use the following data:\nTransactions: ${JSON.stringify(txns.slice(0, 200))}\nChart of Accounts: ${JSON.stringify(accounts)}\n\nReturn JSON: { "title": "Balance Sheet", "period": "${input.period}", "assets": { "current": [{"description": "...", "amount": number}], "nonCurrent": [{"description": "...", "amount": number}], "totalAssets": number }, "liabilities": { "current": [...], "nonCurrent": [...], "totalLiabilities": number }, "equity": { "items": [...], "totalEquity": number } }`
-        : `Generate a Cash Flow Statement for period ${input.period}. Use the following data:\nTransactions: ${JSON.stringify(txns.slice(0, 200))}\nChart of Accounts: ${JSON.stringify(accounts)}\n\nReturn JSON: { "title": "Cash Flow Statement", "period": "${input.period}", "operating": { "items": [{"description": "...", "amount": number}], "total": number }, "investing": { "items": [...], "total": number }, "financing": { "items": [...], "total": number }, "netCashFlow": number, "openingBalance": number, "closingBalance": number }`;
 
       const result = await invokeLLM({
         messages: [
-          { role: "system", content: "You are a Malaysian Chartered Accountant preparing financial statements compliant with MFRS/MPERS. Generate accurate financial statements from the provided data. If data is insufficient, use reasonable estimates and note assumptions. Return valid JSON only." },
-          { role: "user", content: prompt }
+          {
+            role: "system",
+            content: `You are David, a Chartered Accountant preparing financial statements for ${company?.name || "the company"} (${company?.companyType || "sdn_bhd"}) in Malaysia. Generate a ${input.statementType.replace("_", " ")} for period ${input.period}. Follow MFRS/MPERS standards. Return structured JSON.`
+          },
+          {
+            role: "user",
+            content: `Generate ${input.statementType} for period ${input.period}.\n\nTransactions: ${JSON.stringify(txns.map(t => ({ date: t.date, desc: t.description, amount: t.amount, type: t.transactionType, category: t.category })))}\n\nIncome Statement Lines: ${JSON.stringify(incomeLines.map(l => ({ period: l.period, type: l.lineType, desc: l.description, amount: l.amount })))}\n\nChart of Accounts: ${JSON.stringify(accounts.map(a => ({ code: a.code, name: a.name, type: a.accountType })))}`
+          }
         ],
+        response_format: {
+          type: "json_schema",
+          json_schema: {
+            name: "financial_statement",
+            strict: true,
+            schema: {
+              type: "object",
+              properties: {
+                title: { type: "string" },
+                period: { type: "string" },
+                sections: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      name: { type: "string" },
+                      items: {
+                        type: "array",
+                        items: {
+                          type: "object",
+                          properties: {
+                            label: { type: "string" },
+                            amount: { type: "number" },
+                            isSubtotal: { type: "boolean" }
+                          },
+                          required: ["label", "amount", "isSubtotal"],
+                          additionalProperties: false,
+                        }
+                      },
+                      subtotal: { type: "number" }
+                    },
+                    required: ["name", "items", "subtotal"],
+                    additionalProperties: false,
+                  }
+                },
+                grandTotal: { type: "number" },
+                notes: { type: "string" }
+              },
+              required: ["title", "period", "sections", "grandTotal", "notes"],
+              additionalProperties: false,
+            }
+          }
+        }
       });
 
       const content = result.choices[0]?.message?.content;
-      let statementData: any;
-      try {
-        const jsonStr = typeof content === "string" ? content : "";
-        const match = jsonStr.match(/\{[\s\S]*\}/);
-        statementData = match ? JSON.parse(match[0]) : { error: "Failed to parse" };
-      } catch {
-        statementData = { error: "Failed to generate statement", raw: content };
-      }
+      const statementData = typeof content === "string" ? JSON.parse(content) : {};
 
       const snapshotId = await db.saveFinancialSnapshot({
         companyId: input.companyId,
@@ -619,7 +866,7 @@ const financialRouter = router({
     }))
     .query(async ({ ctx, input }) => {
       const role = await db.getMemberRole(input.companyId, ctx.user.id);
-      if (role !== "owner") throw new TRPCError({ code: "FORBIDDEN", message: "Only company owners can view financial statements" });
+      if (role !== "owner") throw new TRPCError({ code: "FORBIDDEN" });
       return db.getFinancialSnapshots(input.companyId, input.statementType);
     }),
 });
@@ -635,12 +882,6 @@ const advisorRouter = router({
       return db.getConversations(input.companyId, ctx.user.id, input.advisorType);
     }),
 
-  getConversation: protectedProcedure
-    .input(z.object({ id: z.number() }))
-    .query(async ({ input }) => {
-      return db.getConversationById(input.id);
-    }),
-
   startConversation: protectedProcedure
     .input(z.object({
       companyId: z.number(),
@@ -648,19 +889,20 @@ const advisorRouter = router({
     }))
     .mutation(async ({ ctx, input }) => {
       const company = await db.getCompanyById(input.companyId);
-      if (!company) throw new TRPCError({ code: "NOT_FOUND" });
+      const systemPrompt = getAdvisorSystemPrompt(
+        input.advisorType,
+        company?.name || "Your Company",
+        company?.companyType || "sdn_bhd"
+      );
 
-      const systemPrompt = getAdvisorSystemPrompt(input.advisorType, company.name, company.companyType);
       const messages = [{ role: "system", content: systemPrompt, timestamp: Date.now() }];
-
       const id = await db.createConversation({
         companyId: input.companyId,
         userId: ctx.user.id,
         advisorType: input.advisorType,
         title: "New conversation",
-        messages: messages,
+        messages,
       });
-
       return { id, messages };
     }),
 

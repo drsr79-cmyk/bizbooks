@@ -82,7 +82,7 @@ export default function IncomeStatement() {
 
   const handleDelete = async (id: number) => {
     try {
-      await deleteLineMutation.mutateAsync({ id });
+      await deleteLineMutation.mutateAsync({ lineId: id, companyId: activeCompany!.id });
       toast.success("Line item removed");
       await utils.incomeStatement.list.invalidate();
     } catch (e: any) {
