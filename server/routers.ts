@@ -352,6 +352,31 @@ const documentRouter = router({
         throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Re-processing failed" });
       }
     }),
+  reprocessAll: protectedProcedure
+    .input(z.object({ companyId: z.number() }))
+    .mutation(async ({ ctx, input }) => {
+      const role = await db.getMemberRole(input.companyId, ctx.user.id);
+      if (!role || role === "staff") throw new TRPCError({ code: "FORBIDDEN" });
+
+      // Find all documents that are processed but have no ocrData, or are in error/pending state
+      const allDocs = await db.getDocuments(input.companyId);
+      const failedDocs = allDocs.filter(d => 
+        d.status === "error" || 
+        d.status === "pending" || 
+        (d.status === "processed" && !d.ocrData)
+      );
+
+      let reprocessed = 0;
+      for (const doc of failedDocs) {
+        await db.updateDocument(doc.id, { status: "processing" });
+        processDocumentAsync(doc.id, doc.fileUrl, doc.docType, doc.fileName, doc.companyId, doc.mimeType ?? "application/octet-stream").catch(err => {
+          console.error(`[ReprocessAll] Error for doc ${doc.id}:`, err.message);
+        });
+        reprocessed++;
+      }
+
+      return { reprocessed, total: failedDocs.length };
+    }),
 });
 
 // ─── Bookkeeper Clarification Formatter ─────────────────────────────

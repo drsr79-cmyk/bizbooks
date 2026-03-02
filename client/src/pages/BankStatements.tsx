@@ -44,6 +44,20 @@ export default function BankStatements() {
   const ocrMutation = trpc.document.processWithOCR.useMutation();
   const updateCategoryMutation = trpc.transaction.updateCategory.useMutation();
   const clarifyMutation = trpc.document.respondToClarification.useMutation();
+  const reprocessAllMutation = trpc.document.reprocessAll.useMutation();
+
+  const failedDocs = documents?.filter(d => d.status === "error" || d.status === "pending" || (d.status === "processed" && !d.ocrData)) ?? [];
+
+  const handleReprocessAll = async () => {
+    if (!activeCompany) return;
+    try {
+      const result = await reprocessAllMutation.mutateAsync({ companyId: activeCompany.id });
+      toast.success(`Reprocessing ${result.reprocessed} documents...`);
+      utils.document.list.invalidate();
+    } catch (err: any) {
+      toast.error(err.message || "Failed to reprocess");
+    }
+  };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -309,9 +323,17 @@ export default function BankStatements() {
       {/* Uploaded Statements */}
       {documents && documents.length > 0 && (
         <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Uploaded Statements</CardTitle>
-            <CardDescription>Status of your uploaded bank and credit card statements</CardDescription>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <div>
+              <CardTitle className="text-lg">Uploaded Statements</CardTitle>
+              <CardDescription>Status of your uploaded bank and credit card statements</CardDescription>
+            </div>
+            {failedDocs.length > 0 && (
+              <Button variant="outline" size="sm" onClick={handleReprocessAll} disabled={reprocessAllMutation.isPending}>
+                {reprocessAllMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <RefreshCw className="w-3 h-3 mr-1" />}
+                Reprocess All ({failedDocs.length})
+              </Button>
+            )}
           </CardHeader>
           <CardContent>
             <div className="space-y-2">

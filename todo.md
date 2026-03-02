@@ -90,3 +90,9 @@
 - [x] Added Reprocess button for documents that show processed but have no data
 - [x] Fixed processWithOCR to also handle bank/credit card statement transactions
 - [x] Verify fix works end-to-end
+
+## Bug: System cannot read PDF documents
+- [x] Diagnosed: PDF reading via LLM works correctly - old documents uploaded before content parsing fix still showed as processed with no data
+- [x] Added reprocessAll endpoint to batch-reprocess all failed/empty documents
+- [x] Added "Reprocess All Failed" button to both Bank Statements and Documents pages
+- [x] Verified LLM correctly reads PDFs via file_url with application/pdf mime type

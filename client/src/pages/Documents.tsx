@@ -35,6 +35,20 @@ export default function Documents() {
   const uploadMutation = trpc.document.upload.useMutation();
   const ocrMutation = trpc.document.processWithOCR.useMutation();
   const clarifyMutation = trpc.document.respondToClarification.useMutation();
+  const reprocessAllMutation = trpc.document.reprocessAll.useMutation();
+
+  const failedDocs = documents?.filter(d => d.status === "error" || d.status === "pending" || (d.status === "processed" && !d.ocrData)) ?? [];
+
+  const handleReprocessAll = async () => {
+    if (!activeCompany) return;
+    try {
+      const result = await reprocessAllMutation.mutateAsync({ companyId: activeCompany.id });
+      toast.success(`Reprocessing ${result.reprocessed} documents...`);
+      utils.document.list.invalidate();
+    } catch (err: any) {
+      toast.error(err.message || "Failed to reprocess");
+    }
+  };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -144,10 +158,17 @@ export default function Documents() {
           <h1 className="text-2xl font-bold tracking-tight">Documents</h1>
           <p className="text-muted-foreground">Upload receipts, invoices, and documents — AI auto-categorizes them</p>
         </div>
-        <Dialog open={uploadOpen} onOpenChange={setUploadOpen}>
-          <DialogTrigger asChild>
-            <Button><Upload className="w-4 h-4 mr-2" />Upload Document</Button>
-          </DialogTrigger>
+        <div className="flex gap-2">
+          {failedDocs.length > 0 && (
+            <Button variant="outline" onClick={handleReprocessAll} disabled={reprocessAllMutation.isPending}>
+              {reprocessAllMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <RefreshCw className="w-4 h-4 mr-2" />}
+              Reprocess Failed ({failedDocs.length})
+            </Button>
+          )}
+          <Dialog open={uploadOpen} onOpenChange={setUploadOpen}>
+            <DialogTrigger asChild>
+              <Button><Upload className="w-4 h-4 mr-2" />Upload Document</Button>
+            </DialogTrigger>
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
               <DialogTitle>Upload Document</DialogTitle>
@@ -210,6 +231,7 @@ export default function Documents() {
             </div>
           </DialogContent>
         </Dialog>
+        </div>
       </div>
 
       {/* Clarification Dialog */}
