@@ -37,16 +37,17 @@ type MenuItem = {
   label: string;
   path: string;
   ownerOnly?: boolean;
+  fullAccessOnly?: boolean;
 };
 
 const allMenuItems: MenuItem[] = [
   { icon: LayoutDashboard, label: "Dashboard", path: "/dashboard" },
   { icon: Receipt, label: "Documents", path: "/documents" },
-  { icon: CreditCard, label: "Bank Statements", path: "/bank-statements" },
-  { icon: FileText, label: "Transactions", path: "/transactions" },
+  { icon: CreditCard, label: "Bank Statements", path: "/bank-statements", fullAccessOnly: true },
+  { icon: FileText, label: "Transactions", path: "/transactions", fullAccessOnly: true },
   { icon: TrendingUp, label: "Income Statement", path: "/income-statement", ownerOnly: true },
   { icon: BarChart3, label: "Financial Reports", path: "/financials", ownerOnly: true },
-  { icon: MessageSquare, label: "AI Advisors", path: "/advisors" },
+  { icon: MessageSquare, label: "AI Advisors", path: "/advisors", fullAccessOnly: true },
   { icon: Building2, label: "Companies", path: "/companies" },
 ];
 
@@ -133,7 +134,12 @@ function DashboardLayoutContent({
   const isMobile = useIsMobile();
   const { companies, activeCompany, setActiveCompanyId } = useCompany();
   const isOwner = activeCompany?.memberRole === 'owner';
-  const menuItems = allMenuItems.filter(item => !item.ownerOnly || isOwner);
+  const isFullAccess = isOwner || activeCompany?.accessLevel === 'full';
+  const menuItems = allMenuItems.filter(item => {
+    if (item.ownerOnly && !isOwner) return false;
+    if (item.fullAccessOnly && !isFullAccess) return false;
+    return true;
+  });
   const activeMenuItem = menuItems.find(item => item.path === location);
 
   useEffect(() => {

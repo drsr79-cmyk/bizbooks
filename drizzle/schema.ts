@@ -45,6 +45,7 @@ export const companyMembers = mysqlTable("company_members", {
   companyId: int("companyId").notNull(),
   userId: int("userId").notNull(),
   memberRole: mysqlEnum("memberRole", ["owner", "staff"]).notNull(),
+  accessLevel: mysqlEnum("accessLevel", ["full", "limited"]).default("full").notNull(),
   permissions: json("permissions"), // JSON array of permission strings
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });

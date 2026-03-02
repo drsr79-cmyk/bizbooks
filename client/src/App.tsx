@@ -42,6 +42,30 @@ function OwnerRoute({ component: Component }: { component: React.ComponentType }
   return <Component />;
 }
 
+/**
+ * Route guard: requires full access (owner or staff with full access).
+ * Limited staff are redirected to /dashboard.
+ */
+function FullAccessRoute({ component: Component }: { component: React.ComponentType }) {
+  const { activeCompany } = useCompany();
+  const toastShown = useRef(false);
+  const isOwner = activeCompany?.memberRole === "owner";
+  const isFullAccess = isOwner || activeCompany?.accessLevel === "full";
+
+  useEffect(() => {
+    if (activeCompany && !isFullAccess && !toastShown.current) {
+      toastShown.current = true;
+      toast.error("Limited access", {
+        description: "You have limited access. Contact the company owner for full access.",
+      });
+    }
+  }, [activeCompany, isFullAccess]);
+
+  if (!activeCompany) return <Component />;
+  if (!isFullAccess) return <Redirect to="/dashboard" />;
+  return <Component />;
+}
+
 function DashboardRoutes() {
   return (
     <CompanyProvider>
@@ -49,15 +73,21 @@ function DashboardRoutes() {
         <Switch>
           <Route path="/dashboard" component={Dashboard} />
           <Route path="/documents" component={Documents} />
-          <Route path="/bank-statements" component={BankStatements} />
-          <Route path="/transactions" component={Transactions} />
+          <Route path="/bank-statements">
+            <FullAccessRoute component={BankStatements} />
+          </Route>
+          <Route path="/transactions">
+            <FullAccessRoute component={Transactions} />
+          </Route>
           <Route path="/income-statement">
             <OwnerRoute component={IncomeStatement} />
           </Route>
           <Route path="/financials">
             <OwnerRoute component={Financials} />
           </Route>
-          <Route path="/advisors" component={Advisors} />
+          <Route path="/advisors">
+            <FullAccessRoute component={Advisors} />
+          </Route>
           <Route path="/companies" component={Companies} />
           <Route component={NotFound} />
         </Switch>

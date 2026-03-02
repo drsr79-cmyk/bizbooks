@@ -95,7 +95,7 @@ export async function getUserCompanies(userId: number) {
   const result = await db.select().from(companies).where(sql`${companies.id} IN (${sql.join(companyIds.map(id => sql`${id}`), sql`, `)})`);
   return result.map(c => {
     const membership = memberships.find(m => m.companyId === c.id);
-    return { ...c, memberRole: membership?.memberRole ?? 'staff', permissions: membership?.permissions };
+    return { ...c, memberRole: membership?.memberRole ?? 'staff', accessLevel: membership?.accessLevel ?? 'full', permissions: membership?.permissions };
   });
 }
 
@@ -357,4 +357,47 @@ export async function getStaffInputSummary(companyId: number, userId: number) {
     transactions: txns.length,
     categoryBreakdown,
   };
+}
+
+
+// ─── Member Management ─────────────────────────────────────────────
+export async function getUserByEmail(email: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(users).where(eq(users.email, email)).limit(1);
+  return result[0];
+}
+
+export async function updateCompanyMember(memberId: number, data: { memberRole?: string; accessLevel?: string; permissions?: string }) {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(companyMembers).set(data as any).where(eq(companyMembers.id, memberId));
+}
+
+export async function removeCompanyMember(memberId: number) {
+  const db = await getDb();
+  if (!db) return;
+  await db.delete(companyMembers).where(eq(companyMembers.id, memberId));
+}
+
+export async function getMemberByCompanyAndUser(companyId: number, userId: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(companyMembers)
+    .where(and(eq(companyMembers.companyId, companyId), eq(companyMembers.userId, userId)))
+    .limit(1);
+  return result[0];
+}
+
+// ─── Transaction Deletion ──────────────────────────────────────────
+export async function deleteTransaction(id: number) {
+  const db = await getDb();
+  if (!db) return;
+  await db.delete(transactions).where(eq(transactions.id, id));
+}
+
+export async function deleteTransactionsByDocumentId(documentId: number) {
+  const db = await getDb();
+  if (!db) return;
+  await db.delete(transactions).where(eq(transactions.documentId, documentId));
 }

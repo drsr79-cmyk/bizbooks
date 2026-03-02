@@ -1,7 +1,7 @@
 import { useCompany } from "@/contexts/CompanyContext";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Upload, FileText, Receipt, Camera, Loader2, CheckCircle2, AlertCircle, Eye, X } from "lucide-react";
+import { Upload, FileText, Receipt, Camera, Loader2, CheckCircle2, AlertCircle, Eye, X, Sparkles, RefreshCw } from "lucide-react";
 import { useState, useRef } from "react";
 import { toast } from "sonner";
 
@@ -22,13 +22,14 @@ export default function Documents() {
   const [uploading, setUploading] = useState(false);
   const [clarificationDoc, setClarificationDoc] = useState<any>(null);
   const [clarificationResponse, setClarificationResponse] = useState("");
+  const [viewingDoc, setViewingDoc] = useState<any>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
 
   const utils = trpc.useUtils();
   const { data: documents, isLoading } = trpc.document.list.useQuery(
     { companyId: activeCompany?.id ?? 0 },
-    { enabled: !!activeCompany }
+    { enabled: !!activeCompany, refetchInterval: 5000 } // Poll for processing status updates
   );
 
   const uploadMutation = trpc.document.upload.useMutation();
@@ -65,7 +66,7 @@ export default function Documents() {
         reader.readAsDataURL(selectedFile);
       });
 
-      const result = await uploadMutation.mutateAsync({
+      await uploadMutation.mutateAsync({
         companyId: activeCompany.id,
         docType: docType as any,
         fileName: selectedFile.name,
@@ -73,22 +74,10 @@ export default function Documents() {
         mimeType: selectedFile.type,
       });
 
-      toast.success("Document uploaded successfully");
-
-      // Auto-process with OCR for receipts and invoices
-      if (docType === "receipt" || docType === "invoice") {
-        toast.info("Processing document with AI...");
-        try {
-          const ocrResult = await ocrMutation.mutateAsync({ documentId: result.id });
-          if (ocrResult.needsClarification) {
-            toast.warning("AI needs clarification on some items");
-          } else {
-            toast.success("Document processed successfully");
-          }
-        } catch {
-          toast.error("OCR processing failed — you can retry later");
-        }
-      }
+      toast.success("Document uploaded! AI is now auto-categorizing it...", {
+        description: "The document will be processed in the background. You'll see the status update shortly.",
+        duration: 5000,
+      });
 
       await utils.document.list.invalidate();
       setUploadOpen(false);
@@ -98,6 +87,21 @@ export default function Documents() {
       toast.error(e.message || "Upload failed");
     } finally {
       setUploading(false);
+    }
+  };
+
+  const handleRetryOCR = async (docId: number) => {
+    try {
+      toast.info("Re-processing document...");
+      const result = await ocrMutation.mutateAsync({ documentId: docId });
+      if (result.needsClarification) {
+        toast.warning("AI needs clarification on some items");
+      } else {
+        toast.success("Document processed successfully!");
+      }
+      await utils.document.list.invalidate();
+    } catch {
+      toast.error("Processing failed — please try again later");
     }
   };
 
@@ -118,15 +122,15 @@ export default function Documents() {
   };
 
   const statusBadge = (status: string) => {
-    const variants: Record<string, { variant: "default" | "secondary" | "destructive" | "outline"; label: string }> = {
+    const variants: Record<string, { variant: "default" | "secondary" | "destructive" | "outline"; label: string; icon?: React.ReactNode }> = {
       pending: { variant: "secondary", label: "Pending" },
-      processing: { variant: "outline", label: "Processing" },
-      processed: { variant: "default", label: "Processed" },
+      processing: { variant: "outline", label: "AI Processing...", icon: <Loader2 className="w-3 h-3 animate-spin mr-1" /> },
+      processed: { variant: "default", label: "Auto-Categorized", icon: <Sparkles className="w-3 h-3 mr-1" /> },
       error: { variant: "destructive", label: "Error" },
-      needs_clarification: { variant: "destructive", label: "Needs Clarification" },
+      needs_clarification: { variant: "destructive", label: "Needs Clarification", icon: <AlertCircle className="w-3 h-3 mr-1" /> },
     };
-    const s = variants[status] ?? { variant: "secondary" as const, label: status };
-    return <Badge variant={s.variant}>{s.label}</Badge>;
+    const s = variants[status] ?? { variant: "secondary" as const, label: status, icon: undefined };
+    return <Badge variant={s.variant} className="flex items-center">{s.icon ?? null}{s.label}</Badge>;
   };
 
   const receipts = documents?.filter(d => d.docType === "receipt") ?? [];
@@ -138,7 +142,7 @@ export default function Documents() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Documents</h1>
-          <p className="text-muted-foreground">Upload and manage receipts, invoices, and other documents</p>
+          <p className="text-muted-foreground">Upload receipts, invoices, and documents — AI auto-categorizes them</p>
         </div>
         <Dialog open={uploadOpen} onOpenChange={setUploadOpen}>
           <DialogTrigger asChild>
@@ -147,7 +151,7 @@ export default function Documents() {
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
               <DialogTitle>Upload Document</DialogTitle>
-              <DialogDescription>Upload a receipt, invoice, or other document for processing</DialogDescription>
+              <DialogDescription>Upload a receipt, invoice, or document. AI will automatically extract and categorize the data.</DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
               <div className="space-y-2">
@@ -192,9 +196,16 @@ export default function Documents() {
                 </Button>
               </div>
 
+              <div className="rounded-lg bg-primary/5 border border-primary/20 p-3 text-sm text-muted-foreground">
+                <div className="flex items-center gap-2 text-primary font-medium mb-1">
+                  <Sparkles className="w-4 h-4" />AI Auto-Categorization
+                </div>
+                After upload, our AI will automatically extract vendor, date, amount, items, and suggest a category. If anything is unclear, you'll be asked to clarify.
+              </div>
+
               <Button onClick={handleUpload} className="w-full" disabled={!selectedFile || uploading}>
-                {uploading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
-                {uploading ? "Uploading & Processing..." : "Upload"}
+                {uploading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Sparkles className="w-4 h-4 mr-2" />}
+                {uploading ? "Uploading..." : "Upload & Auto-Categorize"}
               </Button>
             </div>
           </DialogContent>
@@ -205,16 +216,19 @@ export default function Documents() {
       <Dialog open={!!clarificationDoc} onOpenChange={() => setClarificationDoc(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Clarification Needed</DialogTitle>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertCircle className="w-5 h-5 text-amber-500" />
+              Clarification Needed
+            </DialogTitle>
             <DialogDescription>Our AI needs your help to process this document correctly</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
-            <div className="p-3 rounded-lg bg-warning/10 border border-warning/30">
-              <p className="text-sm font-medium text-warning-foreground flex items-center gap-2">
-                <AlertCircle className="w-4 h-4" />
+            <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 dark:bg-amber-950/30 dark:border-amber-800">
+              <p className="text-sm font-medium flex items-center gap-2 mb-1">
+                <AlertCircle className="w-4 h-4 text-amber-500" />
                 AI Question:
               </p>
-              <p className="text-sm mt-1">{clarificationDoc?.clarificationNote}</p>
+              <p className="text-sm">{clarificationDoc?.clarificationNote}</p>
             </div>
             <div className="space-y-2">
               <Label>Your Response</Label>
@@ -230,6 +244,48 @@ export default function Documents() {
               Submit Clarification
             </Button>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* OCR Data Viewer */}
+      <Dialog open={!!viewingDoc} onOpenChange={() => setViewingDoc(null)}>
+        <DialogContent className="sm:max-w-lg max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Extracted Data</DialogTitle>
+            <DialogDescription>{viewingDoc?.fileName}</DialogDescription>
+          </DialogHeader>
+          {viewingDoc?.ocrData && (
+            <div className="space-y-3 text-sm">
+              {viewingDoc.ocrData.vendor && (
+                <div className="flex justify-between"><span className="text-muted-foreground">Vendor</span><span className="font-medium">{viewingDoc.ocrData.vendor}</span></div>
+              )}
+              {viewingDoc.ocrData.date && (
+                <div className="flex justify-between"><span className="text-muted-foreground">Date</span><span className="font-medium">{viewingDoc.ocrData.date}</span></div>
+              )}
+              {viewingDoc.ocrData.total != null && (
+                <div className="flex justify-between"><span className="text-muted-foreground">Total</span><span className="font-medium">{viewingDoc.ocrData.currency} {viewingDoc.ocrData.total?.toFixed(2)}</span></div>
+              )}
+              {viewingDoc.ocrData.suggestedCategory && (
+                <div className="flex justify-between"><span className="text-muted-foreground">Category</span><Badge variant="secondary">{viewingDoc.ocrData.suggestedCategory}</Badge></div>
+              )}
+              {viewingDoc.ocrData.invoiceNumber && (
+                <div className="flex justify-between"><span className="text-muted-foreground">Invoice #</span><span className="font-mono">{viewingDoc.ocrData.invoiceNumber}</span></div>
+              )}
+              {viewingDoc.ocrData.items?.length > 0 && (
+                <div className="mt-2">
+                  <span className="text-muted-foreground block mb-1">Line Items:</span>
+                  <div className="space-y-1">
+                    {viewingDoc.ocrData.items.map((item: any, i: number) => (
+                      <div key={i} className="flex justify-between p-2 rounded bg-muted/50">
+                        <span className="truncate mr-2">{item.description}</span>
+                        <span className="font-mono shrink-0">{item.amount?.toFixed(2)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 
@@ -269,15 +325,31 @@ export default function Documents() {
                         </div>
                         <div className="min-w-0 flex-1">
                           <p className="text-sm font-medium truncate">{doc.fileName}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {new Date(doc.createdAt).toLocaleDateString("en-MY", { day: "numeric", month: "short", year: "numeric" })}
-                          </p>
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <span>{new Date(doc.createdAt).toLocaleDateString("en-MY", { day: "numeric", month: "short", year: "numeric" })}</span>
+                            {doc.ocrData && (doc.ocrData as any).vendor && (
+                              <span className="text-foreground/70">• {(doc.ocrData as any).vendor}</span>
+                            )}
+                            {doc.ocrData && (doc.ocrData as any).total != null && (
+                              <span className="font-mono text-foreground/70">• RM {(doc.ocrData as any).total?.toFixed(2)}</span>
+                            )}
+                          </div>
                         </div>
                         {statusBadge(doc.status)}
                         <div className="flex gap-1">
                           {doc.status === "needs_clarification" && (
                             <Button variant="outline" size="sm" onClick={() => setClarificationDoc(doc)}>
                               <AlertCircle className="w-3 h-3 mr-1" />Clarify
+                            </Button>
+                          )}
+                          {doc.status === "error" && (
+                            <Button variant="outline" size="sm" onClick={() => handleRetryOCR(doc.id)} disabled={ocrMutation.isPending}>
+                              <RefreshCw className="w-3 h-3 mr-1" />Retry
+                            </Button>
+                          )}
+                          {doc.status === "processed" && !!doc.ocrData && (
+                            <Button variant="ghost" size="sm" onClick={() => setViewingDoc(doc)}>
+                              <Sparkles className="w-3 h-3 mr-1" />View Data
                             </Button>
                           )}
                           <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => window.open(doc.fileUrl, "_blank")}>

@@ -71,28 +71,29 @@ const companyRouter = router({
     .mutation(async ({ ctx, input }) => {
       const companyId = await db.createCompany({
         ...input,
-      taxNumber: input.taxNumber,
-      ownerName: input.ownerName,
-      ownerIc: input.ownerIc,
-      address: input.address,
-      financialYearEnd: input.financialYearEnd,
+        taxNumber: input.taxNumber,
+        ownerName: input.ownerName,
+        ownerIc: input.ownerIc,
+        address: input.address,
+        financialYearEnd: input.financialYearEnd,
         createdBy: ctx.user.id,
       });
-      // Add creator as owner
       await db.addCompanyMember({
         companyId,
         userId: ctx.user.id,
         memberRole: "owner",
+        accessLevel: "full",
         permissions: JSON.stringify(["all"]),
       });
-      // Seed default chart of accounts
       await db.seedDefaultAccounts(companyId);
       return { id: companyId };
     }),
 
   getMembers: protectedProcedure
     .input(z.object({ companyId: z.number() }))
-    .query(async ({ input }) => {
+    .query(async ({ ctx, input }) => {
+      const role = await db.getMemberRole(input.companyId, ctx.user.id);
+      if (!role) throw new TRPCError({ code: "FORBIDDEN", message: "Not a member of this company" });
       return db.getCompanyMembers(input.companyId);
     }),
 
@@ -101,11 +102,64 @@ const companyRouter = router({
       companyId: z.number(),
       userEmail: z.string().email(),
       memberRole: z.enum(["owner", "staff"]),
-      permissions: z.array(z.string()).optional(),
+      accessLevel: z.enum(["full", "limited"]).default("full"),
     }))
-    .mutation(async ({ input }) => {
-      // For now, we store the invitation. In production, this would send an email.
-      return { success: true, message: "Member invitation sent" };
+    .mutation(async ({ ctx, input }) => {
+      // Only owners can add members
+      const callerRole = await db.getMemberRole(input.companyId, ctx.user.id);
+      if (callerRole !== "owner") throw new TRPCError({ code: "FORBIDDEN", message: "Only owners can add members" });
+
+      // Find user by email
+      const targetUser = await db.getUserByEmail(input.userEmail);
+      if (!targetUser) throw new TRPCError({ code: "NOT_FOUND", message: "No user found with that email. They must sign up first." });
+
+      // Check if already a member
+      const existing = await db.getMemberByCompanyAndUser(input.companyId, targetUser.id);
+      if (existing) throw new TRPCError({ code: "CONFLICT", message: "This user is already a member of the company" });
+
+      await db.addCompanyMember({
+        companyId: input.companyId,
+        userId: targetUser.id,
+        memberRole: input.memberRole,
+        accessLevel: input.accessLevel,
+        permissions: JSON.stringify(input.memberRole === "owner" ? ["all"] : ["upload", "view_own"]),
+      });
+
+      return { success: true, userName: targetUser.name };
+    }),
+
+  updateMember: protectedProcedure
+    .input(z.object({
+      memberId: z.number(),
+      companyId: z.number(),
+      memberRole: z.enum(["owner", "staff"]).optional(),
+      accessLevel: z.enum(["full", "limited"]).optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const callerRole = await db.getMemberRole(input.companyId, ctx.user.id);
+      if (callerRole !== "owner") throw new TRPCError({ code: "FORBIDDEN", message: "Only owners can update members" });
+
+      const updateData: any = {};
+      if (input.memberRole) {
+        updateData.memberRole = input.memberRole;
+        updateData.permissions = JSON.stringify(input.memberRole === "owner" ? ["all"] : ["upload", "view_own"]);
+      }
+      if (input.accessLevel) updateData.accessLevel = input.accessLevel;
+
+      await db.updateCompanyMember(input.memberId, updateData);
+      return { success: true };
+    }),
+
+  removeMember: protectedProcedure
+    .input(z.object({
+      memberId: z.number(),
+      companyId: z.number(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const callerRole = await db.getMemberRole(input.companyId, ctx.user.id);
+      if (callerRole !== "owner") throw new TRPCError({ code: "FORBIDDEN", message: "Only owners can remove members" });
+      await db.removeCompanyMember(input.memberId);
+      return { success: true };
     }),
 
   getChartOfAccounts: protectedProcedure
@@ -115,7 +169,7 @@ const companyRouter = router({
     }),
 });
 
-// ─// ─── Document Router ────────────────────────────────────────────
+// ─── Document Router ────────────────────────────────────────────────
 const documentRouter = router({
   upload: protectedProcedure
     .input(z.object({
@@ -126,9 +180,9 @@ const documentRouter = router({
       mimeType: z.string(),
     }))
     .mutation(async ({ ctx, input }) => {
-      // Verify user is a member of this company
       const role = await db.getMemberRole(input.companyId, ctx.user.id);
-      if (!role) throw new TRPCError({ code: 'FORBIDDEN', message: 'You do not have access to this company' });
+      if (!role) throw new TRPCError({ code: "FORBIDDEN", message: "You do not have access to this company" });
+
       const fileBuffer = Buffer.from(input.fileBase64, "base64");
       const fileKey = `docs/${input.companyId}/${nanoid()}-${input.fileName}`;
       const { url } = await storagePut(fileKey, fileBuffer, input.mimeType);
@@ -141,8 +195,22 @@ const documentRouter = router({
         fileUrl: url,
         fileKey,
         mimeType: input.mimeType,
-        status: "pending",
+        status: "processing",
       });
+
+      // Auto-categorize: trigger OCR + categorization in background
+      const isImage = input.mimeType.startsWith("image/");
+      const isPdf = input.mimeType === "application/pdf";
+
+      if (isImage || isPdf) {
+        // Fire-and-forget: process document with LLM
+        processDocumentAsync(docId, url, input.docType, input.fileName, input.companyId).catch(err => {
+          console.error("[AutoCategorize] Error:", err);
+        });
+      } else {
+        // Non-image/pdf files: mark as pending for manual processing
+        await db.updateDocument(docId, { status: "pending" });
+      }
 
       return { id: docId, url };
     }),
@@ -154,7 +222,7 @@ const documentRouter = router({
     }))
     .query(async ({ ctx, input }) => {
       const role = await db.getMemberRole(input.companyId, ctx.user.id);
-      if (!role) throw new TRPCError({ code: 'FORBIDDEN', message: 'You do not have access to this company' });
+      if (!role) throw new TRPCError({ code: "FORBIDDEN", message: "You do not have access to this company" });
       return db.getDocuments(input.companyId, input.docType);
     }),
 
@@ -173,64 +241,7 @@ const documentRouter = router({
       await db.updateDocument(doc.id, { status: "processing" });
 
       try {
-        const messages: any[] = [
-          {
-            role: "system",
-            content: `You are an OCR and document analysis expert. Extract all text and structured data from the uploaded document image. Return a JSON object with: { "extractedText": "full text", "vendor": "vendor name if receipt/invoice", "date": "YYYY-MM-DD", "total": number, "currency": "MYR", "items": [{"description": "item", "amount": number}], "taxAmount": number, "invoiceNumber": "if applicable", "documentType": "receipt|invoice|statement" }. If any field is unclear, set it to null and add a "clarificationNeeded" array describing what's unclear.`
-          },
-          {
-            role: "user",
-            content: [
-              { type: "text", text: `Please extract and analyse this ${doc.docType} document: ${doc.fileName}` },
-              { type: "image_url", image_url: { url: doc.fileUrl, detail: "high" } }
-            ]
-          }
-        ];
-
-        const result = await invokeLLM({
-          messages,
-          response_format: {
-            type: "json_schema",
-            json_schema: {
-              name: "ocr_result",
-              strict: true,
-              schema: {
-                type: "object",
-                properties: {
-                  extractedText: { type: "string" },
-                  vendor: { type: ["string", "null"] },
-                  date: { type: ["string", "null"] },
-                  total: { type: ["number", "null"] },
-                  currency: { type: "string" },
-                  items: {
-                    type: "array",
-                    items: {
-                      type: "object",
-                      properties: {
-                        description: { type: "string" },
-                        amount: { type: "number" }
-                      },
-                      required: ["description", "amount"],
-                      additionalProperties: false,
-                    }
-                  },
-                  taxAmount: { type: ["number", "null"] },
-                  invoiceNumber: { type: ["string", "null"] },
-                  documentType: { type: "string" },
-                  clarificationNeeded: {
-                    type: "array",
-                    items: { type: "string" }
-                  }
-                },
-                required: ["extractedText", "vendor", "date", "total", "currency", "items", "taxAmount", "invoiceNumber", "documentType", "clarificationNeeded"],
-                additionalProperties: false,
-              }
-            }
-          }
-        });
-
-        const content = result.choices[0]?.message?.content;
-        const ocrData = typeof content === "string" ? JSON.parse(content) : null;
+        const ocrData = await extractDocumentData(doc.fileUrl, doc.docType, doc.fileName);
         const needsClarification = ocrData?.clarificationNeeded?.length > 0;
 
         await db.updateDocument(doc.id, {
@@ -239,6 +250,21 @@ const documentRouter = router({
           status: needsClarification ? "needs_clarification" : "processed",
           clarificationNote: needsClarification ? ocrData.clarificationNeeded.join("; ") : null,
         });
+
+        // Auto-create transaction if total is detected
+        if (ocrData?.total && ocrData.total > 0) {
+          await db.createTransaction({
+            companyId: doc.companyId,
+            documentId: doc.id,
+            date: ocrData.date ? new Date(ocrData.date) : new Date(),
+            description: ocrData.vendor || doc.fileName,
+            amount: ocrData.total.toFixed(2),
+            transactionType: doc.docType === "invoice" ? "credit" : "debit",
+            category: ocrData.suggestedCategory || (doc.docType === "receipt" ? "Miscellaneous Expenses" : "Sales Revenue"),
+            autoCategory: ocrData.suggestedCategory || null,
+            manualOverride: false,
+          });
+        }
 
         return { success: true, ocrData, needsClarification };
       } catch (error: any) {
@@ -261,7 +287,103 @@ const documentRouter = router({
     }),
 });
 
-/// ─── Transaction Router ─────────────────────────────────────────
+// ─── Auto-categorization helper (fire-and-forget) ───────────────────
+async function extractDocumentData(fileUrl: string, docType: string, fileName: string) {
+  const messages: any[] = [
+    {
+      role: "system",
+      content: `You are an OCR and document analysis expert for Malaysian businesses. Extract all text and structured data from the uploaded document. Return a JSON object with: { "extractedText": "full text", "vendor": "vendor name if receipt/invoice", "date": "YYYY-MM-DD", "total": number, "currency": "MYR", "items": [{"description": "item", "amount": number}], "taxAmount": number, "invoiceNumber": "if applicable", "documentType": "receipt|invoice|statement", "suggestedCategory": "best category from: Sales Revenue, Service Revenue, Cost of Goods Sold, Salaries & Wages, Rent & Utilities, Office Supplies, Marketing & Advertising, Professional Fees, Travel & Entertainment, Miscellaneous Expenses", "clarificationNeeded": [] }. If any field is unclear, set it to null and add a description to "clarificationNeeded" array.`
+    },
+    {
+      role: "user",
+      content: [
+        { type: "text", text: `Please extract and analyse this ${docType} document: ${fileName}` },
+        { type: "image_url", image_url: { url: fileUrl, detail: "high" } }
+      ]
+    }
+  ];
+
+  const result = await invokeLLM({
+    messages,
+    response_format: {
+      type: "json_schema",
+      json_schema: {
+        name: "ocr_result",
+        strict: true,
+        schema: {
+          type: "object",
+          properties: {
+            extractedText: { type: "string" },
+            vendor: { type: ["string", "null"] },
+            date: { type: ["string", "null"] },
+            total: { type: ["number", "null"] },
+            currency: { type: "string" },
+            items: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  description: { type: "string" },
+                  amount: { type: "number" }
+                },
+                required: ["description", "amount"],
+                additionalProperties: false,
+              }
+            },
+            taxAmount: { type: ["number", "null"] },
+            invoiceNumber: { type: ["string", "null"] },
+            documentType: { type: "string" },
+            suggestedCategory: { type: ["string", "null"] },
+            clarificationNeeded: {
+              type: "array",
+              items: { type: "string" }
+            }
+          },
+          required: ["extractedText", "vendor", "date", "total", "currency", "items", "taxAmount", "invoiceNumber", "documentType", "suggestedCategory", "clarificationNeeded"],
+          additionalProperties: false,
+        }
+      }
+    }
+  });
+
+  const content = result.choices[0]?.message?.content;
+  return typeof content === "string" ? JSON.parse(content) : null;
+}
+
+async function processDocumentAsync(docId: number, fileUrl: string, docType: string, fileName: string, companyId: number) {
+  try {
+    const ocrData = await extractDocumentData(fileUrl, docType, fileName);
+    const needsClarification = ocrData?.clarificationNeeded?.length > 0;
+
+    await db.updateDocument(docId, {
+      ocrText: ocrData?.extractedText ?? "",
+      ocrData: ocrData,
+      status: needsClarification ? "needs_clarification" : "processed",
+      clarificationNote: needsClarification ? ocrData.clarificationNeeded.join("; ") : null,
+    });
+
+    // Auto-create transaction from extracted data
+    if (ocrData?.total && ocrData.total > 0) {
+      await db.createTransaction({
+        companyId,
+        documentId: docId,
+        date: ocrData.date ? new Date(ocrData.date) : new Date(),
+        description: ocrData.vendor || fileName,
+        amount: ocrData.total.toFixed(2),
+        transactionType: docType === "invoice" ? "credit" : "debit",
+        category: ocrData.suggestedCategory || (docType === "receipt" ? "Miscellaneous Expenses" : "Sales Revenue"),
+        autoCategory: ocrData.suggestedCategory || null,
+        autoCategoryConfidence: "85.00",
+        manualOverride: false,
+      });
+    }
+  } catch (err: any) {
+    console.error("[processDocumentAsync] Failed:", err.message);
+    await db.updateDocument(docId, { status: "error", clarificationNote: err.message });
+  }
+}
+
+// ─── Transaction Router ─────────────────────────────────────────────
 const transactionRouter = router({
   list: protectedProcedure
     .input(z.object({
@@ -271,7 +393,7 @@ const transactionRouter = router({
     }))
     .query(async ({ ctx, input }) => {
       const role = await db.getMemberRole(input.companyId, ctx.user.id);
-      if (!role) throw new TRPCError({ code: 'FORBIDDEN', message: 'You do not have access to this company' });
+      if (!role) throw new TRPCError({ code: "FORBIDDEN", message: "You do not have access to this company" });
       return db.getTransactions(input.companyId, input.limit ?? 100, input.offset ?? 0);
     }),
 
@@ -329,7 +451,6 @@ const transactionRouter = router({
       const content = result.choices[0]?.message?.content;
       const parsed = typeof content === "string" ? JSON.parse(content) : { transactions: [] };
 
-      // Save transactions to DB
       const txData = parsed.transactions.map((tx: any) => ({
         companyId: input.companyId,
         documentId: input.documentId,
@@ -371,7 +492,7 @@ const transactionRouter = router({
     .input(z.object({
       companyId: z.number(),
       date: z.string(),
-      description: z.string(),
+      description: z.string().min(1),
       amount: z.string(),
       transactionType: z.enum(["debit", "credit"]),
       category: z.string().optional(),
@@ -390,6 +511,18 @@ const transactionRouter = router({
       });
       return { id };
     }),
+
+  delete: protectedProcedure
+    .input(z.object({
+      transactionId: z.number(),
+      companyId: z.number(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const role = await db.getMemberRole(input.companyId, ctx.user.id);
+      if (!role) throw new TRPCError({ code: "FORBIDDEN", message: "You do not have access to this company" });
+      await db.deleteTransaction(input.transactionId);
+      return { success: true };
+    }),
 });
 
 // ─── Income Statement Router (owner-only) ──────────────────────────
@@ -401,7 +534,7 @@ const incomeStatementRouter = router({
     }))
     .query(async ({ ctx, input }) => {
       const role = await db.getMemberRole(input.companyId, ctx.user.id);
-      if (role !== 'owner') throw new TRPCError({ code: 'FORBIDDEN', message: 'Only company owners can view income statements' });
+      if (role !== "owner") throw new TRPCError({ code: "FORBIDDEN", message: "Only company owners can view income statements" });
       return db.getIncomeStatementLines(input.companyId, input.period);
     }),
 
@@ -415,7 +548,7 @@ const incomeStatementRouter = router({
     }))
     .mutation(async ({ ctx, input }) => {
       const role = await db.getMemberRole(input.companyId, ctx.user.id);
-      if (role !== 'owner') throw new TRPCError({ code: 'FORBIDDEN', message: 'Only company owners can modify income statements' });
+      if (role !== "owner") throw new TRPCError({ code: "FORBIDDEN", message: "Only company owners can modify income statements" });
       const id = await db.createIncomeStatementLine(input);
       return { id };
     }),
@@ -438,33 +571,18 @@ const financialRouter = router({
     }))
     .mutation(async ({ ctx, input }) => {
       const role = await db.getMemberRole(input.companyId, ctx.user.id);
-      if (role !== 'owner') throw new TRPCError({ code: 'FORBIDDEN', message: 'Only company owners can generate financial statements' });
+      if (role !== "owner") throw new TRPCError({ code: "FORBIDDEN", message: "Only company owners can generate financial statements" });
       const [txns, incomeLines, accounts] = await Promise.all([
         db.getTransactions(input.companyId, 10000, 0),
         db.getIncomeStatementLines(input.companyId, input.period),
         db.getChartOfAccounts(input.companyId),
       ]);
 
-      const accountMap = Object.fromEntries(accounts.map(a => [a.code, a]));
-
       const prompt = input.statementType === "profit_loss"
-        ? `Generate a Profit & Loss statement for period ${input.period}. Use the following data:
-Transactions: ${JSON.stringify(txns.slice(0, 200))}
-Income Statement Lines: ${JSON.stringify(incomeLines)}
-Chart of Accounts: ${JSON.stringify(accounts)}
-
-Return JSON: { "title": "Profit & Loss Statement", "period": "${input.period}", "sections": [{ "name": "Revenue", "items": [{"description": "...", "amount": number}], "total": number }, ...], "netProfit": number }`
+        ? `Generate a Profit & Loss statement for period ${input.period}. Use the following data:\nTransactions: ${JSON.stringify(txns.slice(0, 200))}\nIncome Statement Lines: ${JSON.stringify(incomeLines)}\nChart of Accounts: ${JSON.stringify(accounts)}\n\nReturn JSON: { "title": "Profit & Loss Statement", "period": "${input.period}", "sections": [{ "name": "Revenue", "items": [{"description": "...", "amount": number}], "total": number }, ...], "netProfit": number }`
         : input.statementType === "balance_sheet"
-        ? `Generate a Balance Sheet for period ${input.period}. Use the following data:
-Transactions: ${JSON.stringify(txns.slice(0, 200))}
-Chart of Accounts: ${JSON.stringify(accounts)}
-
-Return JSON: { "title": "Balance Sheet", "period": "${input.period}", "assets": { "current": [{"description": "...", "amount": number}], "nonCurrent": [{"description": "...", "amount": number}], "totalAssets": number }, "liabilities": { "current": [...], "nonCurrent": [...], "totalLiabilities": number }, "equity": { "items": [...], "totalEquity": number } }`
-        : `Generate a Cash Flow Statement for period ${input.period}. Use the following data:
-Transactions: ${JSON.stringify(txns.slice(0, 200))}
-Chart of Accounts: ${JSON.stringify(accounts)}
-
-Return JSON: { "title": "Cash Flow Statement", "period": "${input.period}", "operating": { "items": [{"description": "...", "amount": number}], "total": number }, "investing": { "items": [...], "total": number }, "financing": { "items": [...], "total": number }, "netCashFlow": number, "openingBalance": number, "closingBalance": number }`;
+        ? `Generate a Balance Sheet for period ${input.period}. Use the following data:\nTransactions: ${JSON.stringify(txns.slice(0, 200))}\nChart of Accounts: ${JSON.stringify(accounts)}\n\nReturn JSON: { "title": "Balance Sheet", "period": "${input.period}", "assets": { "current": [{"description": "...", "amount": number}], "nonCurrent": [{"description": "...", "amount": number}], "totalAssets": number }, "liabilities": { "current": [...], "nonCurrent": [...], "totalLiabilities": number }, "equity": { "items": [...], "totalEquity": number } }`
+        : `Generate a Cash Flow Statement for period ${input.period}. Use the following data:\nTransactions: ${JSON.stringify(txns.slice(0, 200))}\nChart of Accounts: ${JSON.stringify(accounts)}\n\nReturn JSON: { "title": "Cash Flow Statement", "period": "${input.period}", "operating": { "items": [{"description": "...", "amount": number}], "total": number }, "investing": { "items": [...], "total": number }, "financing": { "items": [...], "total": number }, "netCashFlow": number, "openingBalance": number, "closingBalance": number }`;
 
       const result = await invokeLLM({
         messages: [
@@ -501,7 +619,7 @@ Return JSON: { "title": "Cash Flow Statement", "period": "${input.period}", "ope
     }))
     .query(async ({ ctx, input }) => {
       const role = await db.getMemberRole(input.companyId, ctx.user.id);
-      if (role !== 'owner') throw new TRPCError({ code: 'FORBIDDEN', message: 'Only company owners can view financial statements' });
+      if (role !== "owner") throw new TRPCError({ code: "FORBIDDEN", message: "Only company owners can view financial statements" });
       return db.getFinancialSnapshots(input.companyId, input.statementType);
     }),
 });
@@ -558,7 +676,6 @@ const advisorRouter = router({
       const messages = (convo.messages as any[]) || [];
       messages.push({ role: "user", content: input.message, timestamp: Date.now() });
 
-      // Get company data for context
       const [txns, incomeLines, docs] = await Promise.all([
         db.getTransactions(convo.companyId, 50, 0),
         db.getIncomeStatementLines(convo.companyId),
@@ -568,16 +685,14 @@ const advisorRouter = router({
       const contextMsg = `[CONTEXT - Current financial data for reference]
 Recent transactions (last 50): ${JSON.stringify(txns.slice(0, 20).map(t => ({ date: t.date, desc: t.description, amount: t.amount, type: t.transactionType, category: t.category })))}
 Income statement lines: ${JSON.stringify(incomeLines.slice(0, 20).map(l => ({ period: l.period, type: l.lineType, desc: l.description, amount: l.amount })))}
-Documents count: ${docs.length} (${docs.filter(d => d.status === 'processed').length} processed, ${docs.filter(d => d.status === 'needs_clarification').length} need clarification)
+Documents count: ${docs.length} (${docs.filter(d => d.status === "processed").length} processed, ${docs.filter(d => d.status === "needs_clarification").length} need clarification)
 [END CONTEXT]`;
 
-      // Build LLM messages (system + context + conversation history)
       const llmMessages = messages.map((m: any) => ({
         role: m.role as "system" | "user" | "assistant",
         content: m.content,
       }));
 
-      // Insert context before the last user message
       llmMessages.splice(llmMessages.length - 1, 0, {
         role: "system" as const,
         content: contextMsg,
@@ -590,7 +705,6 @@ Documents count: ${docs.length} (${docs.filter(d => d.status === 'processed').le
 
       messages.push({ role: "assistant", content: assistantContent, timestamp: Date.now() });
 
-      // Auto-generate title from first exchange
       let title = convo.title ?? "New conversation";
       if (title === "New conversation" && messages.filter((m: any) => m.role === "user").length === 1) {
         title = input.message.slice(0, 80) + (input.message.length > 80 ? "..." : "");

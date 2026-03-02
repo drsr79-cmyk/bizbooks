@@ -1,0 +1,1 @@
+ALTER TABLE `company_members` ADD `accessLevel` enum('full','limited') DEFAULT 'full' NOT NULL;

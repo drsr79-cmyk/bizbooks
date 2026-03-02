@@ -15,6 +15,13 @@
       "when": 1772292145465,
       "tag": "0001_elite_luckman",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1772455219272,
+      "tag": "0002_powerful_micromax",
+      "breakpoints": true
     }
   ]
 }

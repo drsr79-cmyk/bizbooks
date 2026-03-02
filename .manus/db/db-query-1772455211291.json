@@ -1,0 +1,9 @@
+{
+  "query": "ALTER TABLE `company_members` ADD COLUMN `accessLevel` enum('full','limited') NOT NULL DEFAULT 'full' AFTER `memberRole`;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 2473Nebx83riz1G.caaa8683409b --database XKe8fHcJg7hMbkDDQ2kSnY --execute ALTER TABLE `company_members` ADD COLUMN `accessLevel` enum('full','limited') NOT NULL DEFAULT 'full' AFTER `memberRole`;",
+  "rows": [],
+  "messages": [],
+  "stdout": "",
+  "stderr": "",
+  "execution_time_ms": 2088
+}

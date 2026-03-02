@@ -60,3 +60,16 @@
 - [x] Frontend: Add staff summary view showing their input totals (expenses, receipts, invoices)
 - [x] Frontend: Redirect staff away from restricted routes
 - [x] Frontend: Company owners cannot see other company's income/reports
+
+## Member Access Management & Fixes
+- [x] Backend: Add access_level column (limited/full) to companyMembers table
+- [x] Backend: Add endpoint for owner to update member role (staff/owner) and access level (limited/full)
+- [x] Backend: Add endpoint for owner to invite/add members to company
+- [x] Backend: Add endpoint for owner to remove members from company
+- [x] Backend: Enforce access_level checks - limited staff can only upload, full staff can also edit/delete
+- [x] Frontend: Build member management UI in Companies page (list members, change role, change access)
+- [x] Frontend: Add invite member dialog
+- [x] Backend: Add transaction delete endpoint
+- [x] Frontend: Add delete button on transactions with confirmation
+- [x] Backend: Fix document upload auto-categorization - ensure LLM is called to categorize uploaded documents
+- [x] Frontend: Show categorization status on uploaded documents

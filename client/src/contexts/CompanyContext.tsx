@@ -8,6 +8,7 @@ type CompanyWithRole = {
   ssmNumber: string;
   taxNumber: string | null;
   memberRole: string;
+  accessLevel: string;
   permissions: any;
   currency: string;
   createdAt: Date;

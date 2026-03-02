@@ -1,15 +1,16 @@
 import { useCompany } from "@/contexts/CompanyContext";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { TRANSACTION_CATEGORIES } from "@shared/types";
-import { Plus, Loader2, CreditCard, Edit2, CheckCircle2, X } from "lucide-react";
+import { Plus, Loader2, CreditCard, Edit2, CheckCircle2, X, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -34,6 +35,7 @@ export default function Transactions() {
 
   const createMutation = trpc.transaction.create.useMutation();
   const updateCategoryMutation = trpc.transaction.updateCategory.useMutation();
+  const deleteMutation = trpc.transaction.delete.useMutation();
 
   const handleCreate = async () => {
     if (!description || !amount || !activeCompany) {
@@ -51,9 +53,7 @@ export default function Transactions() {
       });
       toast.success("Transaction added");
       setAddOpen(false);
-      setDescription("");
-      setAmount("");
-      setCategory("");
+      setDescription(""); setAmount(""); setCategory("");
       await utils.transaction.list.invalidate();
     } catch (e: any) {
       toast.error(e.message);
@@ -67,6 +67,17 @@ export default function Transactions() {
       toast.success("Category updated");
       setEditingTxn(null);
       setEditCategory("");
+      await utils.transaction.list.invalidate();
+    } catch (e: any) {
+      toast.error(e.message);
+    }
+  };
+
+  const handleDelete = async (txnId: number) => {
+    if (!activeCompany) return;
+    try {
+      await deleteMutation.mutateAsync({ transactionId: txnId, companyId: activeCompany.id });
+      toast.success("Transaction deleted");
       await utils.transaction.list.invalidate();
     } catch (e: any) {
       toast.error(e.message);
@@ -149,7 +160,7 @@ export default function Transactions() {
                     <TableHead>Description</TableHead>
                     <TableHead>Category</TableHead>
                     <TableHead className="text-right">Amount (RM)</TableHead>
-                    <TableHead className="w-10"></TableHead>
+                    <TableHead className="w-20 text-center">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -188,9 +199,39 @@ export default function Transactions() {
                         {tx.transactionType === "credit" ? "+" : "-"}{parseFloat(tx.amount).toLocaleString("en-MY", { minimumFractionDigits: 2 })}
                       </TableCell>
                       <TableCell>
-                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { setEditingTxn(tx.id); setEditCategory(tx.category ?? ""); }}>
-                          <Edit2 className="w-3 h-3" />
-                        </Button>
+                        <div className="flex items-center justify-center gap-1">
+                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { setEditingTxn(tx.id); setEditCategory(tx.category ?? ""); }}>
+                            <Edit2 className="w-3 h-3" />
+                          </Button>
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive">
+                                <Trash2 className="w-3 h-3" />
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>Delete Transaction</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  Are you sure you want to delete this transaction?
+                                  <span className="block mt-2 font-medium text-foreground">
+                                    "{tx.description}" — RM {parseFloat(tx.amount).toFixed(2)}
+                                  </span>
+                                  This action cannot be undone.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                <AlertDialogAction
+                                  onClick={() => handleDelete(tx.id)}
+                                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                                >
+                                  Delete
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}
