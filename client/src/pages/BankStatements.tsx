@@ -341,6 +341,11 @@ export default function BankStatements() {
                         <RefreshCw className="w-3 h-3 mr-1" />Retry
                       </Button>
                     )}
+                    {doc.status === "processed" && !(doc.ocrData && (doc.ocrData as Record<string, any>).transactions?.length > 0) && !(doc.ocrData && (doc.ocrData as Record<string, any>).total > 0) && (
+                      <Button variant="outline" size="sm" onClick={() => handleRetryProcessing(doc.id)} disabled={ocrMutation.isPending}>
+                        <RefreshCw className="w-3 h-3 mr-1" />Reprocess
+                      </Button>
+                    )}
                   </div>
                 </div>
               ))}

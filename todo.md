@@ -81,3 +81,12 @@
 - [x] Frontend: Show real-time categorization progress on uploaded documents
 - [x] Frontend: Show bookkeeper clarification questions inline on documents page
 - [x] Frontend: Allow user to respond to bookkeeper questions and re-categorize
+
+## Bug: Auto-categorization not working on Bank Statements upload
+- [x] Diagnose why credit card statement upload on Bank Statements page does not trigger auto-categorization
+- [x] Fix the root cause: LLM content parsing failed silently (thinking model returns array content, not string)
+- [x] Created robust llmHelper.ts to handle all content formats
+- [x] Added null ocrData handling - marks as error instead of silently setting processed with no data
+- [x] Added Reprocess button for documents that show processed but have no data
+- [x] Fixed processWithOCR to also handle bank/credit card statement transactions
+- [x] Verify fix works end-to-end

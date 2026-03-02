@@ -9,6 +9,7 @@ import { storagePut } from "./storage";
 import { invokeLLM } from "./_core/llm";
 import { getAdvisorSystemPrompt } from "./advisorPrompts";
 import { nanoid } from "nanoid";
+import { extractLLMContent, parseLLMJson } from "./llmHelper";
 
 // ─── Auth Router ─────────────────────────────────────────────────────
 const authRouter = router({
@@ -219,11 +220,20 @@ const documentRouter = router({
       await db.updateDocument(doc.id, { status: "processing" });
 
       try {
+        // Delete any previously auto-created transactions for this document
+        await db.deleteTransactionsByDocumentId(doc.id);
+
         const ocrData = await extractDocumentData(doc.fileUrl, doc.docType, doc.fileName, doc.mimeType ?? "application/octet-stream");
-        const needsClarification = ocrData?.clarificationNeeded?.length > 0;
+        
+        if (!ocrData) {
+          await db.updateDocument(doc.id, { status: "error", clarificationNote: "AI could not process this document. Please try again." });
+          return { success: false, ocrData: null, needsClarification: false };
+        }
+        
+        const needsClarification = Array.isArray(ocrData.clarificationNeeded) && ocrData.clarificationNeeded.length > 0;
 
         await db.updateDocument(doc.id, {
-          ocrText: ocrData?.extractedText ?? "",
+          ocrText: ocrData.extractedText ?? "",
           ocrData: ocrData,
           status: needsClarification ? "needs_clarification" : "processed",
           clarificationNote: needsClarification
@@ -231,7 +241,8 @@ const documentRouter = router({
             : null,
         });
 
-        if (ocrData?.total && ocrData.total > 0) {
+        // For receipts/invoices: auto-create a single transaction
+        if ((doc.docType === "receipt" || doc.docType === "invoice" || doc.docType === "other") && ocrData.total && ocrData.total > 0) {
           await db.createTransaction({
             companyId: doc.companyId,
             documentId: doc.id,
@@ -245,8 +256,26 @@ const documentRouter = router({
           });
         }
 
+        // For bank/credit card statements: create multiple transactions
+        if ((doc.docType === "bank_statement" || doc.docType === "credit_card_statement") && ocrData.transactions && ocrData.transactions.length > 0) {
+          const txData = ocrData.transactions.map((tx: any) => ({
+            companyId: doc.companyId,
+            documentId: doc.id,
+            date: tx.date ? new Date(tx.date) : new Date(),
+            description: tx.description,
+            amount: Math.abs(tx.amount).toFixed(2),
+            transactionType: tx.type as "debit" | "credit",
+            category: tx.category,
+            autoCategory: tx.category,
+            autoCategoryConfidence: (tx.confidence ?? 80).toFixed(2),
+            manualOverride: false,
+          }));
+          await db.createTransactionsBatch(txData);
+        }
+
         return { success: true, ocrData, needsClarification };
       } catch (error: any) {
+        console.error("[processWithOCR] Failed:", error.message);
         await db.updateDocument(doc.id, { status: "error", clarificationNote: error.message });
         throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "OCR processing failed" });
       }
@@ -446,8 +475,13 @@ IMPORTANT RULES:
     }
   });
 
-  const content = result.choices[0]?.message?.content;
-  return typeof content === "string" ? JSON.parse(content) : null;
+  const parsed = parseLLMJson(result, null);
+  if (parsed) {
+    console.log(`[extractDocumentData] Success: txns=${parsed.transactions?.length ?? 0}, vendor=${parsed.vendor ?? 'N/A'}`);
+  } else {
+    console.error(`[extractDocumentData] Failed to parse LLM response for ${fileName}`);
+  }
+  return parsed;
 }
 
 async function reCategorizeWithClarification(doc: any, userResponse: string) {
@@ -547,18 +581,34 @@ Now provide the complete, corrected analysis in the same JSON format. If you sti
     }
   });
 
-  const content = result.choices[0]?.message?.content;
-  return typeof content === "string" ? JSON.parse(content) : null;
+  const parsed = parseLLMJson(result, null);
+  if (parsed) {
+    console.log(`[reCategorize] Success: txns=${parsed.transactions?.length ?? 0}`);
+  } else {
+    console.error(`[reCategorize] Failed to parse LLM response`);
+  }
+  return parsed;
 }
 
 async function processDocumentAsync(docId: number, fileUrl: string, docType: string, fileName: string, companyId: number, mimeType: string) {
   try {
     console.log(`[AutoCategorize] Processing doc ${docId}: ${fileName} (${mimeType})`);
     const ocrData = await extractDocumentData(fileUrl, docType, fileName, mimeType);
-    const needsClarification = ocrData?.clarificationNeeded?.length > 0;
+    
+    if (!ocrData) {
+      console.error(`[AutoCategorize] extractDocumentData returned null for doc ${docId}`);
+      await db.updateDocument(docId, {
+        status: "error",
+        clarificationNote: "AI could not process this document. Please try uploading again or use the Retry button.",
+      });
+      return;
+    }
+    
+    const needsClarification = Array.isArray(ocrData.clarificationNeeded) && ocrData.clarificationNeeded.length > 0;
+    console.log(`[AutoCategorize] Doc ${docId}: extracted=${!!ocrData.extractedText}, txns=${ocrData.transactions?.length ?? 0}, clarify=${needsClarification}`);
 
     await db.updateDocument(docId, {
-      ocrText: ocrData?.extractedText ?? "",
+      ocrText: ocrData.extractedText ?? "",
       ocrData: ocrData,
       status: needsClarification ? "needs_clarification" : "processed",
       clarificationNote: needsClarification
@@ -845,8 +895,7 @@ const financialRouter = router({
         }
       });
 
-      const content = result.choices[0]?.message?.content;
-      const statementData = typeof content === "string" ? JSON.parse(content) : {};
+      const statementData = parseLLMJson(result, {});
 
       const snapshotId = await db.saveFinancialSnapshot({
         companyId: input.companyId,
@@ -941,9 +990,8 @@ Documents count: ${docs.length} (${docs.filter(d => d.status === "processed").le
       });
 
       const result = await invokeLLM({ messages: llmMessages });
-      const assistantContent = typeof result.choices[0]?.message?.content === "string"
-        ? result.choices[0].message.content
-        : "I apologize, but I encountered an issue processing your request. Could you please rephrase?";
+      const assistantContent = extractLLMContent(result)
+        || "I apologize, but I encountered an issue processing your request. Could you please rephrase?";
 
       messages.push({ role: "assistant", content: assistantContent, timestamp: Date.now() });
 

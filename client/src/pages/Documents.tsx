@@ -347,6 +347,11 @@ export default function Documents() {
                               <RefreshCw className="w-3 h-3 mr-1" />Retry
                             </Button>
                           )}
+                          {doc.status === "processed" && !doc.ocrData && (
+                            <Button variant="outline" size="sm" onClick={() => handleRetryOCR(doc.id)} disabled={ocrMutation.isPending}>
+                              <RefreshCw className="w-3 h-3 mr-1" />Reprocess
+                            </Button>
+                          )}
                           {doc.status === "processed" && !!doc.ocrData && (
                             <Button variant="ghost" size="sm" onClick={() => setViewingDoc(doc)}>
                               <Sparkles className="w-3 h-3 mr-1" />View Data
