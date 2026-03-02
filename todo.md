@@ -51,3 +51,12 @@
 
 ## Bug Fixes
 - [x] Fix HTML nesting error on /companies page: <p> cannot contain nested <div>
+
+## Role-Based Access Control
+- [x] Backend: Guard income statement procedures - owner/admin only
+- [x] Backend: Guard financial report procedures - owner/admin only
+- [x] Backend: Ensure company data isolation - users only see data for companies they belong to
+- [x] Frontend: Hide Income Statement and Financial Reports nav items for staff
+- [x] Frontend: Add staff summary view showing their input totals (expenses, receipts, invoices)
+- [x] Frontend: Redirect staff away from restricted routes
+- [x] Frontend: Company owners cannot see other company's income/reports

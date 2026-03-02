@@ -8,40 +8,193 @@ import { COMPANY_TYPE_LABELS } from "@shared/types";
 import type { CompanyType } from "@shared/types";
 import {
   FileText, Receipt, CreditCard, TrendingUp, Upload, MessageSquare,
-  ArrowUpRight, ArrowDownRight, Building2, AlertCircle
+  ArrowUpRight, ArrowDownRight, Building2, AlertCircle, ClipboardList,
+  PieChart
 } from "lucide-react";
 import { useLocation } from "wouter";
 
-export default function Dashboard() {
-  const { activeCompany } = useCompany();
+function StaffDashboard({ companyId }: { companyId: number }) {
+  const [, setLocation] = useLocation();
+  const { data: summary, isLoading } = trpc.staff.summary.useQuery(
+    { companyId },
+    { enabled: !!companyId }
+  );
+
+  const categoryEntries = summary?.categoryBreakdown
+    ? Object.entries(summary.categoryBreakdown).sort((a, b) => b[1] - a[1])
+    : [];
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-lg font-semibold">Your Input Summary</h2>
+        <p className="text-sm text-muted-foreground mt-1">Overview of documents and data you've contributed</p>
+      </div>
+
+      {/* Staff Stats */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <Card>
+          <CardContent className="pt-5 pb-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-muted-foreground">Receipts Uploaded</p>
+                <span className="text-2xl font-bold mt-1 block">
+                  {isLoading ? <Skeleton className="h-8 w-12" /> : summary?.receipts ?? 0}
+                </span>
+              </div>
+              <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                <Receipt className="w-5 h-5 text-primary" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="pt-5 pb-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-muted-foreground">Invoices Uploaded</p>
+                <span className="text-2xl font-bold mt-1 block">
+                  {isLoading ? <Skeleton className="h-8 w-12" /> : summary?.invoices ?? 0}
+                </span>
+              </div>
+              <div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center">
+                <FileText className="w-5 h-5 text-blue-500" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="pt-5 pb-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-muted-foreground">Bank Statements</p>
+                <span className="text-2xl font-bold mt-1 block">
+                  {isLoading ? <Skeleton className="h-8 w-12" /> : summary?.bankStatements ?? 0}
+                </span>
+              </div>
+              <div className="w-10 h-10 rounded-lg bg-amber-500/10 flex items-center justify-center">
+                <CreditCard className="w-5 h-5 text-amber-500" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Expense/Income Summary */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <Card>
+          <CardContent className="pt-5 pb-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-muted-foreground">Total Expenses Recorded</p>
+                <span className="text-2xl font-bold mt-1 text-red-500 block">
+                  {isLoading ? <Skeleton className="h-8 w-24" /> : `RM ${(summary?.totalExpenses ?? 0).toLocaleString("en-MY", { minimumFractionDigits: 2 })}`}
+                </span>
+              </div>
+              <div className="w-10 h-10 rounded-lg bg-red-500/10 flex items-center justify-center">
+                <ArrowDownRight className="w-5 h-5 text-red-500" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="pt-5 pb-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-muted-foreground">Total Income Recorded</p>
+                <span className="text-2xl font-bold mt-1 text-green-600 block">
+                  {isLoading ? <Skeleton className="h-8 w-24" /> : `RM ${(summary?.totalIncome ?? 0).toLocaleString("en-MY", { minimumFractionDigits: 2 })}`}
+                </span>
+              </div>
+              <div className="w-10 h-10 rounded-lg bg-green-500/10 flex items-center justify-center">
+                <ArrowUpRight className="w-5 h-5 text-green-500" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Category Breakdown */}
+      {categoryEntries.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg flex items-center gap-2">
+              <PieChart className="w-5 h-5" />
+              Expense Categories
+            </CardTitle>
+            <CardDescription>Breakdown of categorized transactions</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {categoryEntries.slice(0, 10).map(([category, amount]) => {
+                const maxAmount = categoryEntries[0]?.[1] ?? 1;
+                const pct = (amount / maxAmount) * 100;
+                return (
+                  <div key={category}>
+                    <div className="flex items-center justify-between text-sm mb-1">
+                      <span className="font-medium truncate mr-3">{category}</span>
+                      <span className="text-muted-foreground font-mono shrink-0">
+                        RM {amount.toLocaleString("en-MY", { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                    <div className="h-2 rounded-full bg-muted overflow-hidden">
+                      <div className="h-full rounded-full bg-primary/60 transition-all" style={{ width: `${pct}%` }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Quick Actions for Staff */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">Quick Actions</CardTitle>
+          <CardDescription>Upload documents and manage your entries</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          <Button variant="outline" className="w-full justify-start gap-3 h-11" onClick={() => setLocation("/documents")}>
+            <Upload className="w-4 h-4" />
+            Upload Receipt or Invoice
+          </Button>
+          <Button variant="outline" className="w-full justify-start gap-3 h-11" onClick={() => setLocation("/bank-statements")}>
+            <CreditCard className="w-4 h-4" />
+            Upload Bank Statement
+          </Button>
+          <Button variant="outline" className="w-full justify-start gap-3 h-11" onClick={() => setLocation("/transactions")}>
+            <ClipboardList className="w-4 h-4" />
+            View Transactions
+          </Button>
+          <Button variant="outline" className="w-full justify-start gap-3 h-11" onClick={() => setLocation("/advisors")}>
+            <MessageSquare className="w-4 h-4" />
+            Talk to an Advisor
+          </Button>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function OwnerDashboard({ companyId }: { companyId: number }) {
   const [, setLocation] = useLocation();
 
   const { data: documents, isLoading: docsLoading } = trpc.document.list.useQuery(
-    { companyId: activeCompany?.id ?? 0 },
-    { enabled: !!activeCompany }
+    { companyId },
+    { enabled: !!companyId }
   );
 
   const { data: transactions, isLoading: txnLoading } = trpc.transaction.list.useQuery(
-    { companyId: activeCompany?.id ?? 0, limit: 10 },
-    { enabled: !!activeCompany }
+    { companyId, limit: 10 },
+    { enabled: !!companyId }
   );
-
-  if (!activeCompany) {
-    return (
-      <div className="flex flex-col items-center justify-center h-[60vh] gap-4">
-        <Building2 className="w-12 h-12 text-muted-foreground" />
-        <h2 className="text-xl font-semibold">No Company Selected</h2>
-        <p className="text-muted-foreground text-center max-w-md">
-          Register a company to get started with your accounting.
-        </p>
-        <Button onClick={() => setLocation("/companies/new")}>Register Company</Button>
-      </div>
-    );
-  }
 
   const receiptCount = documents?.filter(d => d.docType === "receipt").length ?? 0;
   const invoiceCount = documents?.filter(d => d.docType === "invoice").length ?? 0;
-  const statementCount = documents?.filter(d => d.docType === "bank_statement" || d.docType === "credit_card_statement").length ?? 0;
   const needsClarification = documents?.filter(d => d.status === "needs_clarification").length ?? 0;
 
   const totalDebits = transactions?.reduce((sum, t) => t.transactionType === "debit" ? sum + parseFloat(t.amount) : sum, 0) ?? 0;
@@ -49,19 +202,6 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
-      {/* Company Header */}
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">{activeCompany.name}</h1>
-          <div className="flex items-center gap-2 mt-1">
-            <Badge variant="secondary">
-              {COMPANY_TYPE_LABELS[activeCompany.companyType as CompanyType] ?? activeCompany.companyType}
-            </Badge>
-            <span className="text-sm text-muted-foreground">SSM: {activeCompany.ssmNumber}</span>
-          </div>
-        </div>
-      </div>
-
       {/* Alerts */}
       {needsClarification > 0 && (
         <Card className="border-warning/50 bg-warning/5">
@@ -141,7 +281,7 @@ export default function Dashboard() {
         </Card>
       </div>
 
-      {/* Quick Actions */}
+      {/* Quick Actions & Recent Transactions */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <Card>
           <CardHeader>
@@ -209,6 +349,52 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       </div>
+    </div>
+  );
+}
+
+export default function Dashboard() {
+  const { activeCompany } = useCompany();
+  const [, setLocation] = useLocation();
+
+  if (!activeCompany) {
+    return (
+      <div className="flex flex-col items-center justify-center h-[60vh] gap-4">
+        <Building2 className="w-12 h-12 text-muted-foreground" />
+        <h2 className="text-xl font-semibold">No Company Selected</h2>
+        <p className="text-muted-foreground text-center max-w-md">
+          Register a company to get started with your accounting.
+        </p>
+        <Button onClick={() => setLocation("/companies")}>Register Company</Button>
+      </div>
+    );
+  }
+
+  const isOwner = activeCompany.memberRole === "owner";
+
+  return (
+    <div className="space-y-6">
+      {/* Company Header */}
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">{activeCompany.name}</h1>
+          <div className="flex items-center gap-2 mt-1">
+            <Badge variant="secondary">
+              {COMPANY_TYPE_LABELS[activeCompany.companyType as CompanyType] ?? activeCompany.companyType}
+            </Badge>
+            <span className="text-sm text-muted-foreground">SSM: {activeCompany.ssmNumber}</span>
+            <Badge variant={isOwner ? "default" : "outline"} className="text-xs">
+              {isOwner ? "Owner" : "Staff"}
+            </Badge>
+          </div>
+        </div>
+      </div>
+
+      {isOwner ? (
+        <OwnerDashboard companyId={activeCompany.id} />
+      ) : (
+        <StaffDashboard companyId={activeCompany.id} />
+      )}
     </div>
   );
 }

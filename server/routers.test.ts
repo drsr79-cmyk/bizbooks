@@ -313,3 +313,29 @@ describe("advisor.sendMessage", () => {
     ).rejects.toThrow();
   });
 });
+
+describe("staff.summary", () => {
+  it("rejects unauthenticated users", async () => {
+    const ctx = createUnauthContext();
+    const caller = appRouter.createCaller(ctx);
+    await expect(
+      caller.staff.summary({ companyId: 1 })
+    ).rejects.toThrow();
+  });
+});
+
+describe("router structure", () => {
+  it("has all expected top-level routers including staff", () => {
+    const routerKeys = Object.keys(appRouter._def.procedures).map(k => k.split(".")[0]);
+    const uniqueKeys = [...new Set(routerKeys)];
+    expect(uniqueKeys).toContain("auth");
+    expect(uniqueKeys).toContain("onboarding");
+    expect(uniqueKeys).toContain("company");
+    expect(uniqueKeys).toContain("document");
+    expect(uniqueKeys).toContain("transaction");
+    expect(uniqueKeys).toContain("incomeStatement");
+    expect(uniqueKeys).toContain("financial");
+    expect(uniqueKeys).toContain("advisor");
+    expect(uniqueKeys).toContain("staff");
+  });
+});

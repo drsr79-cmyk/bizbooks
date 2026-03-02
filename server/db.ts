@@ -313,3 +313,48 @@ export async function updateConversation(id: number, data: { messages?: any; tit
   if (!db) return;
   await db.update(advisorConversations).set(data).where(eq(advisorConversations.id, id));
 }
+
+// ─── Role-based access helpers ──────────────────────────────────────
+export async function getMemberRole(companyId: number, userId: number): Promise<string | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const result = await db.select().from(companyMembers)
+    .where(and(eq(companyMembers.companyId, companyId), eq(companyMembers.userId, userId)))
+    .limit(1);
+  return result[0]?.memberRole ?? null;
+}
+
+export async function getStaffInputSummary(companyId: number, userId: number) {
+  const db = await getDb();
+  if (!db) return { receipts: 0, invoices: 0, bankStatements: 0, totalExpenses: 0, totalIncome: 0, transactions: 0 };
+
+  const userDocs = await db.select().from(documents)
+    .where(and(eq(documents.companyId, companyId), eq(documents.uploadedBy, userId)));
+
+  const receipts = userDocs.filter(d => d.docType === 'receipt').length;
+  const invoices = userDocs.filter(d => d.docType === 'invoice').length;
+  const bankStatements = userDocs.filter(d => d.docType === 'bank_statement' || d.docType === 'credit_card_statement').length;
+
+  const txns = await db.select().from(transactions)
+    .where(eq(transactions.companyId, companyId));
+
+  const totalExpenses = txns.filter(t => t.transactionType === 'debit').reduce((sum, t) => sum + parseFloat(t.amount), 0);
+  const totalIncome = txns.filter(t => t.transactionType === 'credit').reduce((sum, t) => sum + parseFloat(t.amount), 0);
+
+  // Category breakdown
+  const categoryBreakdown: Record<string, number> = {};
+  txns.forEach(t => {
+    const cat = t.category || 'Uncategorized';
+    categoryBreakdown[cat] = (categoryBreakdown[cat] || 0) + parseFloat(t.amount);
+  });
+
+  return {
+    receipts,
+    invoices,
+    bankStatements,
+    totalExpenses,
+    totalIncome,
+    transactions: txns.length,
+    categoryBreakdown,
+  };
+}

@@ -115,7 +115,7 @@ const companyRouter = router({
     }),
 });
 
-// ─── Document Router ────────────────────────────────────────────────
+// ─// ─── Document Router ────────────────────────────────────────────
 const documentRouter = router({
   upload: protectedProcedure
     .input(z.object({
@@ -126,6 +126,9 @@ const documentRouter = router({
       mimeType: z.string(),
     }))
     .mutation(async ({ ctx, input }) => {
+      // Verify user is a member of this company
+      const role = await db.getMemberRole(input.companyId, ctx.user.id);
+      if (!role) throw new TRPCError({ code: 'FORBIDDEN', message: 'You do not have access to this company' });
       const fileBuffer = Buffer.from(input.fileBase64, "base64");
       const fileKey = `docs/${input.companyId}/${nanoid()}-${input.fileName}`;
       const { url } = await storagePut(fileKey, fileBuffer, input.mimeType);
@@ -149,7 +152,9 @@ const documentRouter = router({
       companyId: z.number(),
       docType: z.string().optional(),
     }))
-    .query(async ({ input }) => {
+    .query(async ({ ctx, input }) => {
+      const role = await db.getMemberRole(input.companyId, ctx.user.id);
+      if (!role) throw new TRPCError({ code: 'FORBIDDEN', message: 'You do not have access to this company' });
       return db.getDocuments(input.companyId, input.docType);
     }),
 
@@ -256,7 +261,7 @@ const documentRouter = router({
     }),
 });
 
-// ─── Transaction Router ─────────────────────────────────────────────
+/// ─── Transaction Router ─────────────────────────────────────────
 const transactionRouter = router({
   list: protectedProcedure
     .input(z.object({
@@ -264,7 +269,9 @@ const transactionRouter = router({
       limit: z.number().optional(),
       offset: z.number().optional(),
     }))
-    .query(async ({ input }) => {
+    .query(async ({ ctx, input }) => {
+      const role = await db.getMemberRole(input.companyId, ctx.user.id);
+      if (!role) throw new TRPCError({ code: 'FORBIDDEN', message: 'You do not have access to this company' });
       return db.getTransactions(input.companyId, input.limit ?? 100, input.offset ?? 0);
     }),
 
@@ -385,14 +392,16 @@ const transactionRouter = router({
     }),
 });
 
-// ─── Income Statement Router ────────────────────────────────────────
+// ─── Income Statement Router (owner-only) ──────────────────────────
 const incomeStatementRouter = router({
   list: protectedProcedure
     .input(z.object({
       companyId: z.number(),
       period: z.string().optional(),
     }))
-    .query(async ({ input }) => {
+    .query(async ({ ctx, input }) => {
+      const role = await db.getMemberRole(input.companyId, ctx.user.id);
+      if (role !== 'owner') throw new TRPCError({ code: 'FORBIDDEN', message: 'Only company owners can view income statements' });
       return db.getIncomeStatementLines(input.companyId, input.period);
     }),
 
@@ -404,7 +413,9 @@ const incomeStatementRouter = router({
       description: z.string(),
       amount: z.string(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
+      const role = await db.getMemberRole(input.companyId, ctx.user.id);
+      if (role !== 'owner') throw new TRPCError({ code: 'FORBIDDEN', message: 'Only company owners can modify income statements' });
       const id = await db.createIncomeStatementLine(input);
       return { id };
     }),
@@ -417,7 +428,7 @@ const incomeStatementRouter = router({
     }),
 });
 
-// ─── Financial Statements Router ────────────────────────────────────
+// ─── Financial Statements Router (owner-only) ──────────────────────
 const financialRouter = router({
   generateStatement: protectedProcedure
     .input(z.object({
@@ -426,6 +437,8 @@ const financialRouter = router({
       period: z.string(),
     }))
     .mutation(async ({ ctx, input }) => {
+      const role = await db.getMemberRole(input.companyId, ctx.user.id);
+      if (role !== 'owner') throw new TRPCError({ code: 'FORBIDDEN', message: 'Only company owners can generate financial statements' });
       const [txns, incomeLines, accounts] = await Promise.all([
         db.getTransactions(input.companyId, 10000, 0),
         db.getIncomeStatementLines(input.companyId, input.period),
@@ -486,7 +499,9 @@ Return JSON: { "title": "Cash Flow Statement", "period": "${input.period}", "ope
       companyId: z.number(),
       statementType: z.string().optional(),
     }))
-    .query(async ({ input }) => {
+    .query(async ({ ctx, input }) => {
+      const role = await db.getMemberRole(input.companyId, ctx.user.id);
+      if (role !== 'owner') throw new TRPCError({ code: 'FORBIDDEN', message: 'Only company owners can view financial statements' });
       return db.getFinancialSnapshots(input.companyId, input.statementType);
     }),
 });
@@ -587,6 +602,15 @@ Documents count: ${docs.length} (${docs.filter(d => d.status === 'processed').le
     }),
 });
 
+// ─── Staff Summary Router ──────────────────────────────────────────
+const staffRouter = router({
+  summary: protectedProcedure
+    .input(z.object({ companyId: z.number() }))
+    .query(async ({ ctx, input }) => {
+      return db.getStaffInputSummary(input.companyId, ctx.user.id);
+    }),
+});
+
 // ─── Main Router ────────────────────────────────────────────────────
 export const appRouter = router({
   system: systemRouter,
@@ -598,6 +622,7 @@ export const appRouter = router({
   incomeStatement: incomeStatementRouter,
   financial: financialRouter,
   advisor: advisorRouter,
+  staff: staffRouter,
 });
 
 export type AppRouter = typeof appRouter;
