@@ -29,11 +29,16 @@ export default function BankStatements() {
 
   const utils = trpc.useUtils();
 
-  // Poll documents for processing status updates
-  const { data: documents } = trpc.document.list.useQuery(
-    { companyId: activeCompany?.id ?? 0, docType: statementType },
+  // Poll documents for processing status updates - fetch both bank and credit card statements
+  const { data: bankDocs } = trpc.document.list.useQuery(
+    { companyId: activeCompany?.id ?? 0, docType: "bank_statement" },
     { enabled: !!activeCompany, refetchInterval: 5000 }
   );
+  const { data: ccDocs } = trpc.document.list.useQuery(
+    { companyId: activeCompany?.id ?? 0, docType: "credit_card_statement" },
+    { enabled: !!activeCompany, refetchInterval: 5000 }
+  );
+  const documents = [...(bankDocs ?? []), ...(ccDocs ?? [])].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
   const { data: transactions, isLoading: txnLoading } = trpc.transaction.list.useQuery(
     { companyId: activeCompany?.id ?? 0, limit: 200 },
@@ -163,15 +168,21 @@ export default function BankStatements() {
     }
   };
 
-  const statusBadge = (status: string) => {
+  const statusBadge = (doc: any) => {
+    const status = doc.status;
+    // Check if document is "processed" but has no actual data
+    const hasData = doc.ocrData && ((doc.ocrData as Record<string, any>).transactions?.length > 0 || (doc.ocrData as Record<string, any>).total > 0 || (doc.ocrData as Record<string, any>).extractedText);
+    const effectiveStatus = (status === "processed" && !hasData) ? "needs_reprocessing" : status;
+    
     const variants: Record<string, { variant: "default" | "secondary" | "destructive" | "outline"; label: string; icon?: React.ReactNode }> = {
       pending: { variant: "secondary", label: "Pending" },
       processing: { variant: "outline", label: "AI Processing...", icon: <Loader2 className="w-3 h-3 animate-spin mr-1" /> },
       processed: { variant: "default", label: "Auto-Categorized", icon: <Sparkles className="w-3 h-3 mr-1" /> },
+      needs_reprocessing: { variant: "destructive", label: "Needs Reprocessing", icon: <AlertCircle className="w-3 h-3 mr-1" /> },
       error: { variant: "destructive", label: "Error" },
       needs_clarification: { variant: "destructive", label: "Needs Clarification", icon: <AlertCircle className="w-3 h-3 mr-1" /> },
     };
-    const s = variants[status] ?? { variant: "secondary" as const, label: status, icon: undefined };
+    const s = variants[effectiveStatus] ?? { variant: "secondary" as const, label: status, icon: undefined };
     return <Badge variant={s.variant} className="flex items-center">{s.icon ?? null}{s.label}</Badge>;
   };
 
@@ -351,7 +362,7 @@ export default function BankStatements() {
                       )}
                     </span>
                   </div>
-                  {statusBadge(doc.status)}
+                  {statusBadge(doc)}
                   <div className="flex gap-1">
                     {doc.status === "needs_clarification" && (
                       <Button variant="outline" size="sm" onClick={() => { setClarificationDoc(doc); setClarificationResponse(""); }}>

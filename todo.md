@@ -96,3 +96,10 @@
 - [x] Added reprocessAll endpoint to batch-reprocess all failed/empty documents
 - [x] Added "Reprocess All Failed" button to both Bank Statements and Documents pages
 - [x] Verified LLM correctly reads PDFs via file_url with application/pdf mime type
+
+## Bug: PDF upload still not being read
+- [x] Tested PDF upload end-to-end in browser - test-statement.pdf processed successfully with 10 transactions
+- [x] Added automatic retry logic (up to 2 retries with backoff) to processDocumentAsync
+- [x] Reprocess All button successfully reprocessed 5 old failed documents
+- [x] All 6 documents now show Auto-Categorized with 167 total transactions
+- [x] Sarah (Bookkeeper) clarification flow working - asks about unclear vendor names

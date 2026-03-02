@@ -616,15 +616,34 @@ Now provide the complete, corrected analysis in the same JSON format. If you sti
 }
 
 async function processDocumentAsync(docId: number, fileUrl: string, docType: string, fileName: string, companyId: number, mimeType: string) {
+  const MAX_RETRIES = 2;
+  let ocrData: any = null;
+  
   try {
     console.log(`[AutoCategorize] Processing doc ${docId}: ${fileName} (${mimeType})`);
-    const ocrData = await extractDocumentData(fileUrl, docType, fileName, mimeType);
+    
+    // Retry up to MAX_RETRIES times if extraction returns null
+    for (let attempt = 1; attempt <= MAX_RETRIES + 1; attempt++) {
+      try {
+        ocrData = await extractDocumentData(fileUrl, docType, fileName, mimeType);
+        if (ocrData) break;
+        console.warn(`[AutoCategorize] Attempt ${attempt}/${MAX_RETRIES + 1} returned null for doc ${docId}`);
+        if (attempt <= MAX_RETRIES) {
+          await new Promise(r => setTimeout(r, 2000 * attempt)); // backoff
+        }
+      } catch (retryErr: any) {
+        console.error(`[AutoCategorize] Attempt ${attempt} error for doc ${docId}:`, retryErr.message);
+        if (attempt <= MAX_RETRIES) {
+          await new Promise(r => setTimeout(r, 2000 * attempt));
+        }
+      }
+    }
     
     if (!ocrData) {
-      console.error(`[AutoCategorize] extractDocumentData returned null for doc ${docId}`);
+      console.error(`[AutoCategorize] All attempts failed for doc ${docId}`);
       await db.updateDocument(docId, {
         status: "error",
-        clarificationNote: "AI could not process this document. Please try uploading again or use the Retry button.",
+        clarificationNote: "AI could not process this document after multiple attempts. Please try the Reprocess button.",
       });
       return;
     }
