@@ -1,5 +1,6 @@
 import { eq, and, desc, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
+
 import {
   InsertUser, users,
   companies, InsertCompany,
@@ -11,6 +12,8 @@ import {
   incomeStatementLines,
   financialSnapshots,
   advisorConversations, InsertAdvisorConversation,
+  auditLogs, InsertAuditLog,
+  systemMetrics, InsertSystemMetric,
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
@@ -400,4 +403,117 @@ export async function deleteTransactionsByDocumentId(documentId: number) {
   const db = await getDb();
   if (!db) return;
   await db.delete(transactions).where(eq(transactions.documentId, documentId));
+}
+
+// ─── Admin: Audit Logs ──────────────────────────────────────────────
+export async function logAuditEvent(data: InsertAuditLog) {
+  const db = await getDb();
+  if (!db) return;
+  await db.insert(auditLogs).values(data);
+}
+
+export async function getAuditLogs(limit = 1000, offset = 0) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(auditLogs).orderBy(desc(auditLogs.createdAt)).limit(limit).offset(offset);
+}
+
+export async function getAuditLogsByCompany(companyId: number, limit = 500) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(auditLogs).where(eq(auditLogs.companyId, companyId)).orderBy(desc(auditLogs.createdAt)).limit(limit);
+}
+
+export async function getAuditLogsByUser(userId: number, limit = 500) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(auditLogs).where(eq(auditLogs.userId, userId)).orderBy(desc(auditLogs.createdAt)).limit(limit);
+}
+
+// ─── Admin: System Metrics ──────────────────────────────────────────
+export async function recordSystemMetric(data: InsertSystemMetric) {
+  const db = await getDb();
+  if (!db) return;
+  await db.insert(systemMetrics).values(data);
+}
+
+export async function getSystemMetrics(metricType?: string, limit = 1000) {
+  const db = await getDb();
+  if (!db) return [];
+  if (metricType) {
+    return db.select().from(systemMetrics).where(eq(systemMetrics.metricType, metricType)).orderBy(desc(systemMetrics.createdAt)).limit(limit);
+  }
+  return db.select().from(systemMetrics).orderBy(desc(systemMetrics.createdAt)).limit(limit);
+}
+
+// ─── Admin: Platform Statistics ─────────────────────────────────────
+export async function getAdminStats() {
+  const db = await getDb();
+  if (!db) return null;
+
+  const totalUsers = await db.select({ count: sql`COUNT(*)` }).from(users);
+  const totalCompanies = await db.select({ count: sql`COUNT(*)` }).from(companies);
+  const totalDocuments = await db.select({ count: sql`COUNT(*)` }).from(documents);
+  const totalTransactions = await db.select({ count: sql`COUNT(*)` }).from(transactions);
+  const totalAdvisorConversations = await db.select({ count: sql`COUNT(*)` }).from(advisorConversations);
+
+  // Document status breakdown
+  const docStatusBreakdown = await db.select({
+    status: documents.status,
+    count: sql`COUNT(*)`,
+  }).from(documents).groupBy(documents.status);
+
+  // Transaction type breakdown
+  const txnTypeBreakdown = await db.select({
+    type: transactions.transactionType,
+    count: sql`COUNT(*)`,
+    total: sql`SUM(${transactions.amount})`,
+  }).from(transactions).groupBy(transactions.transactionType);
+
+  return {
+    totalUsers: (totalUsers[0]?.count as number) || 0,
+    totalCompanies: (totalCompanies[0]?.count as number) || 0,
+    totalDocuments: (totalDocuments[0]?.count as number) || 0,
+    totalTransactions: (totalTransactions[0]?.count as number) || 0,
+    totalAdvisorConversations: (totalAdvisorConversations[0]?.count as number) || 0,
+    docStatusBreakdown: docStatusBreakdown || [],
+    txnTypeBreakdown: txnTypeBreakdown || [],
+  };
+}
+
+export async function getAllUsers(limit = 1000, offset = 0) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(users).orderBy(desc(users.createdAt)).limit(limit).offset(offset);
+}
+
+export async function getAllCompanies(limit = 1000, offset = 0) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(companies).orderBy(desc(companies.createdAt)).limit(limit).offset(offset);
+}
+
+export async function getAllTransactions(limit = 1000, offset = 0) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(transactions).orderBy(desc(transactions.date)).limit(limit).offset(offset);
+}
+
+export async function getDocumentProcessingStats() {
+  const db = await getDb();
+  if (!db) return null;
+
+  const totalProcessed = await db.select({ count: sql`COUNT(*)` }).from(documents).where(eq(documents.status, 'processed'));
+  const totalFailed = await db.select({ count: sql`COUNT(*)` }).from(documents).where(eq(documents.status, 'error'));
+  const totalPending = await db.select({ count: sql`COUNT(*)` }).from(documents).where(eq(documents.status, 'pending'));
+  const totalProcessing = await db.select({ count: sql`COUNT(*)` }).from(documents).where(eq(documents.status, 'processing'));
+  const totalNeedsClarification = await db.select({ count: sql`COUNT(*)` }).from(documents).where(eq(documents.status, 'needs_clarification'));
+
+  return {
+    processed: (totalProcessed[0]?.count as number) || 0,
+    failed: (totalFailed[0]?.count as number) || 0,
+    pending: (totalPending[0]?.count as number) || 0,
+    processing: (totalProcessing[0]?.count as number) || 0,
+    needsClarification: (totalNeedsClarification[0]?.count as number) || 0,
+  };
 }

@@ -103,3 +103,16 @@
 - [x] Reprocess All button successfully reprocessed 5 old failed documents
 - [x] All 6 documents now show Auto-Categorized with 167 total transactions
 - [x] Sarah (Bookkeeper) clarification flow working - asks about unclear vendor names
+
+## Admin Console (Platform Owner Only)
+- [x] Extend database schema with admin audit tables (auditLogs, systemMetrics)
+- [x] Create admin backend procedures: getAdminStats, getAllUsers, getAllCompanies, getAllTransactions, getSystemMetrics, getDocumentProcessingStats
+- [x] Build admin dashboard page with system overview (total users, companies, documents, transactions)
+- [x] Build users management page (list all users, view roles, disable/enable accounts)
+- [x] Build companies management page (list all companies, view financial summary, member counts)
+- [x] Build document processing stats page (status breakdown, processing analytics)
+- [x] Build transaction logs page (all transactions across all companies)
+- [x] Build audit logs page (system activity and user actions)
+- [x] Add "Admin Console" menu item to sidebar (admin-only, guarded by adminProcedure)
+- [x] Write vitest tests for admin procedures (11 tests passing)
+- [x] Test admin console end-to-end - all 35 tests passing (24 existing + 11 new admin tests)

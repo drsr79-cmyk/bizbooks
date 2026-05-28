@@ -1059,6 +1059,75 @@ const staffRouter = router({
     }),
 });
 
+// --- Admin Procedure (owner-only) ---
+const adminProcedure = protectedProcedure.use(async ({ ctx, next }) => {
+  if (ctx.user.role !== 'admin') {
+    throw new TRPCError({ code: 'FORBIDDEN', message: 'Admin access required' });
+  }
+  return next({ ctx });
+});
+
+// --- Admin Router ---
+const adminRouter = router({
+  stats: adminProcedure.query(async () => {
+    return db.getAdminStats();
+  }),
+
+  users: adminProcedure
+    .input(z.object({ limit: z.number().default(100), offset: z.number().default(0) }).optional())
+    .query(async ({ input }) => {
+      const limit = input?.limit || 100;
+      const offset = input?.offset || 0;
+      return db.getAllUsers(limit, offset);
+    }),
+
+  companies: adminProcedure
+    .input(z.object({ limit: z.number().default(100), offset: z.number().default(0) }).optional())
+    .query(async ({ input }) => {
+      const limit = input?.limit || 100;
+      const offset = input?.offset || 0;
+      return db.getAllCompanies(limit, offset);
+    }),
+
+  transactions: adminProcedure
+    .input(z.object({ limit: z.number().default(100), offset: z.number().default(0) }).optional())
+    .query(async ({ input }) => {
+      const limit = input?.limit || 100;
+      const offset = input?.offset || 0;
+      return db.getAllTransactions(limit, offset);
+    }),
+
+  documentStats: adminProcedure.query(async () => {
+    return db.getDocumentProcessingStats();
+  }),
+
+  metrics: adminProcedure
+    .input(z.object({ metricType: z.string().optional(), limit: z.number().default(100) }).optional())
+    .query(async ({ input }) => {
+      return db.getSystemMetrics(input?.metricType, input?.limit || 100);
+    }),
+
+  auditLogs: adminProcedure
+    .input(z.object({ limit: z.number().default(100), offset: z.number().default(0) }).optional())
+    .query(async ({ input }) => {
+      const limit = input?.limit || 100;
+      const offset = input?.offset || 0;
+      return db.getAuditLogs(limit, offset);
+    }),
+
+  auditLogsByCompany: adminProcedure
+    .input(z.object({ companyId: z.number(), limit: z.number().default(100) }))
+    .query(async ({ input }) => {
+      return db.getAuditLogsByCompany(input.companyId, input.limit);
+    }),
+
+  auditLogsByUser: adminProcedure
+    .input(z.object({ userId: z.number(), limit: z.number().default(100) }))
+    .query(async ({ input }) => {
+      return db.getAuditLogsByUser(input.userId, input.limit);
+    }),
+});
+
 // ─── Main Router ────────────────────────────────────────────────────
 export const appRouter = router({
   system: systemRouter,
@@ -1071,6 +1140,7 @@ export const appRouter = router({
   financial: financialRouter,
   advisor: advisorRouter,
   staff: staffRouter,
+  admin: adminRouter,
 });
 
 export type AppRouter = typeof appRouter;

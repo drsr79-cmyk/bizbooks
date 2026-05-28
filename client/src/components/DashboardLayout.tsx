@@ -25,7 +25,7 @@ import { useIsMobile } from "@/hooks/useMobile";
 import { useCompany } from "@/contexts/CompanyContext";
 import {
   LayoutDashboard, LogOut, PanelLeft, FileText, CreditCard, TrendingUp,
-  BarChart3, MessageSquare, Building2, Receipt, ChevronDown, CheckCircle2
+  BarChart3, MessageSquare, Building2, Receipt, ChevronDown, CheckCircle2, Settings
 } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
@@ -38,6 +38,7 @@ type MenuItem = {
   path: string;
   ownerOnly?: boolean;
   fullAccessOnly?: boolean;
+  adminOnly?: boolean;
 };
 
 const allMenuItems: MenuItem[] = [
@@ -49,6 +50,7 @@ const allMenuItems: MenuItem[] = [
   { icon: BarChart3, label: "Financial Reports", path: "/financials", ownerOnly: true },
   { icon: MessageSquare, label: "AI Advisors", path: "/advisors", fullAccessOnly: true },
   { icon: Building2, label: "Companies", path: "/companies" },
+  { icon: Settings, label: "Admin Console", path: "/admin", adminOnly: true },
 ];
 
 const SIDEBAR_WIDTH_KEY = "sidebar-width";
@@ -135,9 +137,11 @@ function DashboardLayoutContent({
   const { companies, activeCompany, setActiveCompanyId } = useCompany();
   const isOwner = activeCompany?.memberRole === 'owner';
   const isFullAccess = isOwner || activeCompany?.accessLevel === 'full';
+  const isAdmin = user?.role === 'admin';
   const menuItems = allMenuItems.filter(item => {
     if (item.ownerOnly && !isOwner) return false;
     if (item.fullAccessOnly && !isFullAccess) return false;
+    if (item.adminOnly && !isAdmin) return false;
     return true;
   });
   const activeMenuItem = menuItems.find(item => item.path === location);

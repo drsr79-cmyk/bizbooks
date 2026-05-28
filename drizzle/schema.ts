@@ -176,3 +176,33 @@ export const advisorConversations = mysqlTable("advisor_conversations", {
 
 export type AdvisorConversation = typeof advisorConversations.$inferSelect;
 export type InsertAdvisorConversation = typeof advisorConversations.$inferInsert;
+
+// ─── Admin Audit Logs ───────────────────────────────────────────────
+export const auditLogs = mysqlTable("audit_logs", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId"),
+  companyId: int("companyId"),
+  action: varchar("action", { length: 100 }).notNull(), // e.g. "document_upload", "transaction_delete", "user_created"
+  resourceType: varchar("resourceType", { length: 50 }).notNull(), // e.g. "document", "transaction", "user", "company"
+  resourceId: int("resourceId"),
+  details: json("details"), // Additional context about the action
+  ipAddress: varchar("ipAddress", { length: 45 }),
+  userAgent: text("userAgent"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type AuditLog = typeof auditLogs.$inferSelect;
+export type InsertAuditLog = typeof auditLogs.$inferInsert;
+
+// ─── System Metrics ─────────────────────────────────────────────────
+export const systemMetrics = mysqlTable("system_metrics", {
+  id: int("id").autoincrement().primaryKey(),
+  metricType: varchar("metricType", { length: 100 }).notNull(), // e.g. "document_processed", "llm_call", "transaction_created"
+  value: decimal("value", { precision: 15, scale: 2 }).notNull(),
+  unit: varchar("unit", { length: 50 }), // e.g. "ms", "count", "tokens"
+  metadata: json("metadata"), // Additional context
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type SystemMetric = typeof systemMetrics.$inferSelect;
+export type InsertSystemMetric = typeof systemMetrics.$inferInsert;

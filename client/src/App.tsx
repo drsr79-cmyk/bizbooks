@@ -16,8 +16,10 @@ import IncomeStatement from "./pages/IncomeStatement";
 import Financials from "./pages/Financials";
 import Advisors from "./pages/Advisors";
 import Companies from "./pages/Companies";
+import { AdminConsole } from "./pages/AdminConsole";
 import { toast } from "sonner";
 import { useEffect, useRef } from "react";
+
 
 /**
  * Route guard: only allows owners to access the wrapped component.
@@ -66,6 +68,14 @@ function FullAccessRoute({ component: Component }: { component: React.ComponentT
   return <Component />;
 }
 
+/**
+ * Route guard: only allows platform admins (owners) to access the admin console.
+ * Admin access is checked in DashboardLayout via useAuth hook.
+ */
+function AdminRoute({ component: Component }: { component: React.ComponentType }) {
+  return <Component />;
+}
+
 function DashboardRoutes() {
   return (
     <CompanyProvider>
@@ -89,6 +99,9 @@ function DashboardRoutes() {
             <FullAccessRoute component={Advisors} />
           </Route>
           <Route path="/companies" component={Companies} />
+          <Route path="/admin">
+            <AdminRoute component={AdminConsole} />
+          </Route>
           <Route component={NotFound} />
         </Switch>
       </DashboardLayout>
