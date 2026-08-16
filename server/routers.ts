@@ -10,7 +10,7 @@ import { invokeLLM } from "./_core/llm";
 import { getAdvisorSystemPrompt } from "./advisorPrompts";
 import { nanoid } from "nanoid";
 import { extractLLMContent, parseLLMJson } from "./llmHelper";
-import { ADVISOR_NAME_MAX_LENGTH, ADVISOR_TYPES, resolveAdvisorName } from "@shared/types";
+import { ADVISOR_NAME_ERROR, ADVISOR_NAME_MAX_LENGTH, ADVISOR_NAME_PATTERN, ADVISOR_TYPES, resolveAdvisorName } from "@shared/types";
 import type { AdvisorType } from "@shared/types";
 
 // ─── Auth Router ─────────────────────────────────────────────────────
@@ -999,8 +999,10 @@ const advisorRouter = router({
   setName: protectedProcedure
     .input(z.object({
       companyId: z.number(),
-      advisorType: z.enum(["bookkeeper", "accountant", "tax_agent", "auditor", "cfo"]),
-      name: z.string().trim().min(1).max(ADVISOR_NAME_MAX_LENGTH),
+      advisorType: z.enum(ADVISOR_TYPES),
+      // Narrow allowlist: this value is interpolated into a privileged LLM
+      // system prompt, so newlines/control characters are rejected here.
+      name: z.string().trim().min(1).max(ADVISOR_NAME_MAX_LENGTH).regex(ADVISOR_NAME_PATTERN, ADVISOR_NAME_ERROR),
     }))
     .mutation(async ({ ctx, input }) => {
       const role = await db.getMemberRole(input.companyId, ctx.user.id);
@@ -1027,7 +1029,7 @@ const advisorRouter = router({
   startConversation: protectedProcedure
     .input(z.object({
       companyId: z.number(),
-      advisorType: z.enum(["bookkeeper", "accountant", "tax_agent", "auditor", "cfo"]),
+      advisorType: z.enum(ADVISOR_TYPES),
     }))
     .mutation(async ({ ctx, input }) => {
       const role = await db.getMemberRole(input.companyId, ctx.user.id);

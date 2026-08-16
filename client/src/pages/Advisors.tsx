@@ -8,7 +8,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { ADVISOR_NAME_MAX_LENGTH, ADVISOR_PROFILES, resolveAdvisorName } from "@shared/types";
+import { ADVISOR_NAME_ERROR, ADVISOR_NAME_MAX_LENGTH, ADVISOR_NAME_PATTERN, ADVISOR_PROFILES, resolveAdvisorName } from "@shared/types";
 import type { AdvisorType } from "@shared/types";
 import { Send, Loader2, ArrowLeft, MessageSquare, Plus, Pencil } from "lucide-react";
 import { useState, useRef, useEffect, useMemo } from "react";
@@ -95,6 +95,10 @@ export default function Advisors() {
     }
     if (trimmed.length > ADVISOR_NAME_MAX_LENGTH) {
       toast.error(`Advisor name must be ${ADVISOR_NAME_MAX_LENGTH} characters or fewer`);
+      return;
+    }
+    if (!ADVISOR_NAME_PATTERN.test(trimmed)) {
+      toast.error(ADVISOR_NAME_ERROR);
       return;
     }
     setAdvisorName.mutate({

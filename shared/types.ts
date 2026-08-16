@@ -13,6 +13,32 @@ export const ADVISOR_TYPES = ["bookkeeper", "accountant", "tax_agent", "auditor"
 /** Max length of a custom advisor name. Mirrors advisor_name_overrides.name. */
 export const ADVISOR_NAME_MAX_LENGTH = 40;
 
+/**
+ * Allowed shape of a custom advisor name.
+ *
+ * The name is interpolated into a privileged LLM system prompt, so this is a
+ * deliberately narrow allowlist rather than a denylist. Newlines, tabs and
+ * control characters are rejected outright: those are what would let a stored
+ * value break out of its sentence and pose as a separate instruction line.
+ * Structural characters used to fake prompt scaffolding (`:`, quotes, braces,
+ * brackets, backticks) are excluded for the same reason.
+ *
+ * Unicode-aware (\p{L}/\p{M}) so non-Latin scripts and Malaysian naming
+ * conventions still work — e.g. "Nurul 'Ain", "Abdul Rahman bin Ahmad",
+ * "Muthu a/l Samy", "Mohd Ali @ Ahmad", "陈美玲".
+ */
+// Built via the RegExp constructor rather than a literal: this repo's tsconfig
+// sets no `target`, so it defaults to ES5 and TS rejects the `u` flag on a
+// regex literal (TS1501). Runtime support is fine on Node 18+ and all browsers
+// the client targets.
+export const ADVISOR_NAME_PATTERN = new RegExp(
+  "^[\\p{L}\\p{M}][\\p{L}\\p{M}\\p{N} '’.\\-/@]*$",
+  "u"
+);
+
+export const ADVISOR_NAME_ERROR =
+  "Name must start with a letter and may only contain letters, numbers, spaces, apostrophes, periods, hyphens, slashes and @.";
+
 export type CompanyType = "enterprise" | "plt" | "sdn_bhd" | "bhd";
 
 export const COMPANY_TYPE_LABELS: Record<CompanyType, string> = {
@@ -76,7 +102,19 @@ export function resolveAdvisorName(
   overrides?: Partial<Record<AdvisorType, string>> | null
 ): string {
   const override = overrides?.[advisorType]?.trim();
-  return override ? override : ADVISOR_PROFILES[advisorType].name;
+  if (!override) return ADVISOR_PROFILES[advisorType].name;
+
+  // Defence in depth: this value ends up inside a privileged system prompt, so
+  // re-check it at the point of use rather than trusting that it was validated
+  // on the way in (rows predating validation, direct DB writes, future callers).
+  if (
+    override.length > ADVISOR_NAME_MAX_LENGTH ||
+    !ADVISOR_NAME_PATTERN.test(override)
+  ) {
+    return ADVISOR_PROFILES[advisorType].name;
+  }
+
+  return override;
 }
 
 export const TRANSACTION_CATEGORIES = [
