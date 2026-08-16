@@ -53,6 +53,10 @@ export default function Advisors() {
 
   const advisorName = (type: AdvisorType) => resolveAdvisorName(type, nameOverrides);
 
+  // Renaming writes a company-wide value, so it is owner-only server-side.
+  // Hide the affordance for staff rather than let them click into a 403.
+  const canRenameAdvisors = activeCompany?.memberRole === "owner";
+
   const setAdvisorName = trpc.advisor.setName.useMutation({
     // Optimistic rename, rolled back if the server rejects it.
     onMutate: async variables => {
@@ -289,19 +293,21 @@ export default function Advisors() {
                   <CardTitle className="text-base truncate">{advisorName(type)}</CardTitle>
                   <CardDescription className="text-xs">{profile.title}</CardDescription>
                 </div>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="ml-auto h-8 w-8 shrink-0 text-muted-foreground"
-                  aria-label={`Rename ${advisorName(type)}`}
-                  title="Rename advisor"
-                  onClick={e => {
-                    e.stopPropagation();
-                    openRename(type);
-                  }}
-                >
-                  <Pencil className="w-3.5 h-3.5" />
-                </Button>
+                {canRenameAdvisors && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="ml-auto h-8 w-8 shrink-0 text-muted-foreground"
+                    aria-label={`Rename ${advisorName(type)}`}
+                    title="Rename advisor"
+                    onClick={e => {
+                      e.stopPropagation();
+                      openRename(type);
+                    }}
+                  >
+                    <Pencil className="w-3.5 h-3.5" />
+                  </Button>
+                )}
               </div>
             </CardHeader>
             <CardContent>

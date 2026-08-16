@@ -1005,8 +1005,11 @@ const advisorRouter = router({
       name: z.string().trim().min(1).max(ADVISOR_NAME_MAX_LENGTH).regex(ADVISOR_NAME_PATTERN, ADVISOR_NAME_ERROR),
     }))
     .mutation(async ({ ctx, input }) => {
+      // Owner-only: the name is a company-wide value that lands in every other
+      // member's advisor system prompt, so it follows the same tier as
+      // financial.getSnapshots rather than the any-member read check.
       const role = await db.getMemberRole(input.companyId, ctx.user.id);
-      if (!role) throw new TRPCError({ code: "FORBIDDEN", message: "You do not have access to this company" });
+      if (role !== "owner") throw new TRPCError({ code: "FORBIDDEN", message: "Only owners can rename advisors" });
 
       await db.setAdvisorNameOverride({
         companyId: input.companyId,
