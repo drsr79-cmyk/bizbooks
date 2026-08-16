@@ -3,13 +3,15 @@ import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
-import { ADVISOR_PROFILES } from "@shared/types";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ADVISOR_NAME_MAX_LENGTH, ADVISOR_PROFILES, resolveAdvisorName } from "@shared/types";
 import type { AdvisorType } from "@shared/types";
-import { Send, Loader2, ArrowLeft, MessageSquare, Plus } from "lucide-react";
-import { useState, useRef, useEffect } from "react";
+import { Send, Loader2, ArrowLeft, MessageSquare, Plus, Pencil } from "lucide-react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { toast } from "sonner";
 import { Streamdown } from "streamdown";
 
@@ -23,15 +25,85 @@ export default function Advisors() {
   const [messages, setMessages] = useState<any[]>([]);
   const [inputMessage, setInputMessage] = useState("");
   const [sending, setSending] = useState(false);
+  const [renameTarget, setRenameTarget] = useState<AdvisorType | null>(null);
+  const [renameValue, setRenameValue] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  const utils = trpc.useUtils();
   const startConversation = trpc.advisor.startConversation.useMutation();
   const sendMessage = trpc.advisor.sendMessage.useMutation();
   const { data: conversations } = trpc.advisor.listConversations.useQuery(
     { companyId: activeCompany?.id ?? 0 },
     { enabled: !!activeCompany }
   );
+  const { data: advisorProfiles } = trpc.advisor.profiles.useQuery(
+    { companyId: activeCompany?.id ?? 0 },
+    { enabled: !!activeCompany }
+  );
+
+  // Custom names only; resolveAdvisorName falls back to the built-in default.
+  const nameOverrides = useMemo(() => {
+    const map: Partial<Record<AdvisorType, string>> = {};
+    advisorProfiles?.forEach(p => {
+      if (p.isCustomName) map[p.advisorType] = p.name;
+    });
+    return map;
+  }, [advisorProfiles]);
+
+  const advisorName = (type: AdvisorType) => resolveAdvisorName(type, nameOverrides);
+
+  const setAdvisorName = trpc.advisor.setName.useMutation({
+    // Optimistic rename, rolled back if the server rejects it.
+    onMutate: async variables => {
+      await utils.advisor.profiles.cancel({ companyId: variables.companyId });
+      const previous = utils.advisor.profiles.getData({ companyId: variables.companyId });
+      utils.advisor.profiles.setData({ companyId: variables.companyId }, old =>
+        old?.map(p =>
+          p.advisorType === variables.advisorType
+            ? { ...p, name: variables.name, isCustomName: true }
+            : p
+        )
+      );
+      return { previous };
+    },
+    onSuccess: () => {
+      toast.success("Advisor renamed");
+    },
+    onError: (error, variables, context) => {
+      if (context?.previous) {
+        utils.advisor.profiles.setData({ companyId: variables.companyId }, context.previous);
+      }
+      toast.error(error.message || "Failed to rename advisor");
+    },
+    onSettled: (_data, _error, variables) => {
+      utils.advisor.profiles.invalidate({ companyId: variables.companyId });
+    },
+  });
+
+  const openRename = (type: AdvisorType) => {
+    setRenameTarget(type);
+    setRenameValue(advisorName(type));
+  };
+
+  const handleRenameSubmit = () => {
+    if (!renameTarget || !activeCompany) return;
+    const trimmed = renameValue.trim();
+    if (!trimmed) {
+      toast.error("Advisor name cannot be empty");
+      return;
+    }
+    if (trimmed.length > ADVISOR_NAME_MAX_LENGTH) {
+      toast.error(`Advisor name must be ${ADVISOR_NAME_MAX_LENGTH} characters or fewer`);
+      return;
+    }
+    setAdvisorName.mutate({
+      companyId: activeCompany.id,
+      advisorType: renameTarget,
+      name: trimmed,
+    });
+    setRenameTarget(null);
+  };
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -115,7 +187,7 @@ export default function Advisors() {
             </AvatarFallback>
           </Avatar>
           <div>
-            <h2 className="font-semibold">{profile.name}</h2>
+            <h2 className="font-semibold">{advisorName(selectedAdvisor)}</h2>
             <p className="text-xs text-muted-foreground">{profile.title}</p>
           </div>
           <Badge variant="outline" className="ml-auto" style={{ borderColor: profile.color, color: profile.color }}>
@@ -177,7 +249,7 @@ export default function Advisors() {
               value={inputMessage}
               onChange={e => setInputMessage(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={`Message ${profile.name}...`}
+              placeholder={`Message ${advisorName(selectedAdvisor)}...`}
               disabled={sending}
               className="flex-1"
             />
@@ -209,10 +281,23 @@ export default function Advisors() {
                     {profile.avatar}
                   </AvatarFallback>
                 </Avatar>
-                <div>
-                  <CardTitle className="text-base">{profile.name}</CardTitle>
+                <div className="min-w-0">
+                  <CardTitle className="text-base truncate">{advisorName(type)}</CardTitle>
                   <CardDescription className="text-xs">{profile.title}</CardDescription>
                 </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="ml-auto h-8 w-8 shrink-0 text-muted-foreground"
+                  aria-label={`Rename ${advisorName(type)}`}
+                  title="Rename advisor"
+                  onClick={e => {
+                    e.stopPropagation();
+                    openRename(type);
+                  }}
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                </Button>
               </div>
             </CardHeader>
             <CardContent>
@@ -225,6 +310,46 @@ export default function Advisors() {
           </Card>
         ))}
       </div>
+
+      {/* Rename Advisor Dialog */}
+      <Dialog open={!!renameTarget} onOpenChange={open => !open && setRenameTarget(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Rename Advisor</DialogTitle>
+            <DialogDescription>
+              {renameTarget
+                ? `Give your ${ADVISOR_PROFILES[renameTarget].title} a custom name. This applies to ${activeCompany?.name ?? "this company"} only and takes effect on your next conversation.`
+                : null}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="advisor-name">Name</Label>
+            <Input
+              id="advisor-name"
+              value={renameValue}
+              onChange={e => setRenameValue(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  handleRenameSubmit();
+                }
+              }}
+              maxLength={ADVISOR_NAME_MAX_LENGTH}
+              placeholder={renameTarget ? ADVISOR_PROFILES[renameTarget].name : ""}
+              autoFocus
+            />
+            <p className="text-xs text-muted-foreground">
+              {renameValue.trim().length}/{ADVISOR_NAME_MAX_LENGTH} characters
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRenameTarget(null)}>Cancel</Button>
+            <Button onClick={handleRenameSubmit} disabled={!renameValue.trim()}>
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Previous Conversations */}
       {conversations && conversations.length > 0 && (
@@ -251,7 +376,7 @@ export default function Advisors() {
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-medium truncate">{convo.title}</p>
                       <p className="text-xs text-muted-foreground">
-                        {profile?.name} · {new Date(convo.updatedAt).toLocaleDateString("en-MY")}
+                        {advisorName(convo.advisorType as AdvisorType)} · {new Date(convo.updatedAt).toLocaleDateString("en-MY")}
                       </p>
                     </div>
                     <ArrowLeft className="w-4 h-4 text-muted-foreground rotate-180" />

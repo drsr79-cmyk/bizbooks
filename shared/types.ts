@@ -8,6 +8,11 @@ export * from "./_core/errors";
 
 export type AdvisorType = "bookkeeper" | "accountant" | "tax_agent" | "auditor" | "cfo";
 
+export const ADVISOR_TYPES = ["bookkeeper", "accountant", "tax_agent", "auditor", "cfo"] as const satisfies readonly AdvisorType[];
+
+/** Max length of a custom advisor name. Mirrors advisor_name_overrides.name. */
+export const ADVISOR_NAME_MAX_LENGTH = 40;
+
 export type CompanyType = "enterprise" | "plt" | "sdn_bhd" | "bhd";
 
 export const COMPANY_TYPE_LABELS: Record<CompanyType, string> = {
@@ -60,6 +65,19 @@ export const ADVISOR_PROFILES: Record<AdvisorType, {
     color: "#ca8a04",
   },
 };
+
+/**
+ * Resolve an advisor's display name: a per-company override when one exists,
+ * otherwise the built-in default from ADVISOR_PROFILES.
+ * Shared by server and client so both sides fall back identically.
+ */
+export function resolveAdvisorName(
+  advisorType: AdvisorType,
+  overrides?: Partial<Record<AdvisorType, string>> | null
+): string {
+  const override = overrides?.[advisorType]?.trim();
+  return override ? override : ADVISOR_PROFILES[advisorType].name;
+}
 
 export const TRANSACTION_CATEGORIES = [
   "Sales Revenue",

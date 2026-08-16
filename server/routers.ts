@@ -10,6 +10,8 @@ import { invokeLLM } from "./_core/llm";
 import { getAdvisorSystemPrompt } from "./advisorPrompts";
 import { nanoid } from "nanoid";
 import { extractLLMContent, parseLLMJson } from "./llmHelper";
+import { ADVISOR_NAME_MAX_LENGTH, ADVISOR_TYPES, resolveAdvisorName } from "@shared/types";
+import type { AdvisorType } from "@shared/types";
 
 // ─── Auth Router ─────────────────────────────────────────────────────
 const authRouter = router({
@@ -965,7 +967,54 @@ const financialRouter = router({
 });
 
 // ─── Advisor Router ─────────────────────────────────────────────────
+
+/** Build an AdvisorType -> custom name map from stored overrides. */
+function toAdvisorNameMap(
+  overrides: { advisorType: AdvisorType; name: string }[]
+): Partial<Record<AdvisorType, string>> {
+  const map: Partial<Record<AdvisorType, string>> = {};
+  for (const override of overrides) {
+    map[override.advisorType] = override.name;
+  }
+  return map;
+}
+
 const advisorRouter = router({
+  /** Advisor profiles with per-company name overrides merged over the defaults. */
+  profiles: protectedProcedure
+    .input(z.object({ companyId: z.number() }))
+    .query(async ({ ctx, input }) => {
+      const role = await db.getMemberRole(input.companyId, ctx.user.id);
+      if (!role) throw new TRPCError({ code: "FORBIDDEN", message: "You do not have access to this company" });
+
+      const overrides = toAdvisorNameMap(await db.getAdvisorNameOverrides(input.companyId));
+
+      return ADVISOR_TYPES.map(advisorType => ({
+        advisorType,
+        name: resolveAdvisorName(advisorType, overrides),
+        isCustomName: Boolean(overrides[advisorType]),
+      }));
+    }),
+
+  setName: protectedProcedure
+    .input(z.object({
+      companyId: z.number(),
+      advisorType: z.enum(["bookkeeper", "accountant", "tax_agent", "auditor", "cfo"]),
+      name: z.string().trim().min(1).max(ADVISOR_NAME_MAX_LENGTH),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const role = await db.getMemberRole(input.companyId, ctx.user.id);
+      if (!role) throw new TRPCError({ code: "FORBIDDEN", message: "You do not have access to this company" });
+
+      await db.setAdvisorNameOverride({
+        companyId: input.companyId,
+        advisorType: input.advisorType,
+        name: input.name,
+      });
+
+      return { success: true, name: input.name };
+    }),
+
   listConversations: protectedProcedure
     .input(z.object({
       companyId: z.number(),
@@ -981,9 +1030,17 @@ const advisorRouter = router({
       advisorType: z.enum(["bookkeeper", "accountant", "tax_agent", "auditor", "cfo"]),
     }))
     .mutation(async ({ ctx, input }) => {
-      const company = await db.getCompanyById(input.companyId);
+      const role = await db.getMemberRole(input.companyId, ctx.user.id);
+      if (!role) throw new TRPCError({ code: "FORBIDDEN", message: "You do not have access to this company" });
+
+      const [company, overrides] = await Promise.all([
+        db.getCompanyById(input.companyId),
+        db.getAdvisorNameOverrides(input.companyId),
+      ]);
+
       const systemPrompt = getAdvisorSystemPrompt(
         input.advisorType,
+        resolveAdvisorName(input.advisorType, toAdvisorNameMap(overrides)),
         company?.name || "Your Company",
         company?.companyType || "sdn_bhd"
       );
