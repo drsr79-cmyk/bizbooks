@@ -216,6 +216,13 @@ export async function getTransactions(companyId: number, limit = 100, offset = 0
     .limit(limit).offset(offset);
 }
 
+export async function getTransactionById(id: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(transactions).where(eq(transactions.id, id)).limit(1);
+  return result[0];
+}
+
 export async function updateTransaction(id: number, data: Partial<InsertTransaction>) {
   const db = await getDb();
   if (!db) return;
