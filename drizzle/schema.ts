@@ -1,4 +1,4 @@
-import { int, mysqlEnum, mysqlTable, text, timestamp, varchar, decimal, bigint, json, boolean } from "drizzle-orm/mysql-core";
+import { int, mysqlEnum, mysqlTable, text, timestamp, varchar, decimal, bigint, json, boolean, uniqueIndex, type AnyMySqlColumn } from "drizzle-orm/mysql-core";
 
 // ─── Users ───────────────────────────────────────────────────────────
 export const users = mysqlTable("users", {
@@ -31,7 +31,7 @@ export const companies = mysqlTable("companies", {
   address: text("address"),
   financialYearEnd: varchar("financialYearEnd", { length: 5 }), // MM-DD
   currency: varchar("currency", { length: 3 }).default("MYR").notNull(),
-  createdBy: int("createdBy").notNull(),
+  createdBy: int("createdBy").notNull().references(() => users.id, { onDelete: "restrict" }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
@@ -40,15 +40,19 @@ export type Company = typeof companies.$inferSelect;
 export type InsertCompany = typeof companies.$inferInsert;
 
 // ─── Company Members (role-based access) ─────────────────────────────
-export const companyMembers = mysqlTable("company_members", {
-  id: int("id").autoincrement().primaryKey(),
-  companyId: int("companyId").notNull(),
-  userId: int("userId").notNull(),
-  memberRole: mysqlEnum("memberRole", ["owner", "staff"]).notNull(),
-  accessLevel: mysqlEnum("accessLevel", ["full", "limited"]).default("full").notNull(),
-  permissions: json("permissions"), // JSON array of permission strings
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
+export const companyMembers = mysqlTable(
+  "company_members",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    companyId: int("companyId").notNull().references(() => companies.id, { onDelete: "cascade" }),
+    userId: int("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
+    memberRole: mysqlEnum("memberRole", ["owner", "staff"]).notNull(),
+    accessLevel: mysqlEnum("accessLevel", ["full", "limited"]).default("full").notNull(),
+    permissions: json("permissions"), // JSON array of permission strings
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  table => [uniqueIndex("company_members_company_user_unique").on(table.companyId, table.userId)]
+);
 
 export type CompanyMember = typeof companyMembers.$inferSelect;
 export type InsertCompanyMember = typeof companyMembers.$inferInsert;
@@ -56,14 +60,14 @@ export type InsertCompanyMember = typeof companyMembers.$inferInsert;
 // ─── Chart of Accounts ──────────────────────────────────────────────
 export const chartOfAccounts = mysqlTable("chart_of_accounts", {
   id: int("id").autoincrement().primaryKey(),
-  companyId: int("companyId").notNull(),
+  companyId: int("companyId").notNull().references(() => companies.id, { onDelete: "restrict" }),
   code: varchar("code", { length: 20 }).notNull(),
   name: varchar("name", { length: 255 }).notNull(),
   accountType: mysqlEnum("accountType", [
     "asset", "liability", "equity", "revenue", "expense"
   ]).notNull(),
   subType: varchar("subType", { length: 100 }),
-  parentId: int("parentId"),
+  parentId: int("parentId").references((): AnyMySqlColumn => chartOfAccounts.id, { onDelete: "set null" }),
   isDefault: boolean("isDefault").default(false).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
@@ -73,8 +77,8 @@ export type ChartOfAccount = typeof chartOfAccounts.$inferSelect;
 // ─── Documents (receipts, invoices, bank statements, etc.) ──────────
 export const documents = mysqlTable("documents", {
   id: int("id").autoincrement().primaryKey(),
-  companyId: int("companyId").notNull(),
-  uploadedBy: int("uploadedBy").notNull(),
+  companyId: int("companyId").notNull().references(() => companies.id, { onDelete: "restrict" }),
+  uploadedBy: int("uploadedBy").notNull().references(() => users.id, { onDelete: "restrict" }),
   docType: mysqlEnum("docType", [
     "receipt", "invoice", "bank_statement", "credit_card_statement", "income_statement", "other"
   ]).notNull(),
@@ -96,14 +100,14 @@ export type InsertDocument = typeof documents.$inferInsert;
 // ─── Transactions (from bank/credit card statements + manual) ───────
 export const transactions = mysqlTable("transactions", {
   id: int("id").autoincrement().primaryKey(),
-  companyId: int("companyId").notNull(),
-  documentId: int("documentId"),
+  companyId: int("companyId").notNull().references(() => companies.id, { onDelete: "restrict" }),
+  documentId: int("documentId").references(() => documents.id, { onDelete: "set null" }),
   date: timestamp("date").notNull(),
   description: text("description").notNull(),
   amount: decimal("amount", { precision: 15, scale: 2 }).notNull(),
   transactionType: mysqlEnum("transactionType", ["debit", "credit"]).notNull(),
   category: varchar("category", { length: 255 }),
-  accountId: int("accountId"), // FK to chart_of_accounts
+  accountId: int("accountId").references(() => chartOfAccounts.id, { onDelete: "set null" }),
   autoCategory: varchar("autoCategory", { length: 255 }),
   autoCategoryConfidence: decimal("autoCategoryConfidence", { precision: 5, scale: 2 }),
   manualOverride: boolean("manualOverride").default(false).notNull(),
@@ -119,11 +123,11 @@ export type InsertTransaction = typeof transactions.$inferInsert;
 // ─── Journal Entries ─────────────────────────────────────────────────
 export const journalEntries = mysqlTable("journal_entries", {
   id: int("id").autoincrement().primaryKey(),
-  companyId: int("companyId").notNull(),
-  transactionId: int("transactionId"),
+  companyId: int("companyId").notNull().references(() => companies.id, { onDelete: "restrict" }),
+  transactionId: int("transactionId").references(() => transactions.id, { onDelete: "restrict" }),
   date: timestamp("date").notNull(),
   description: text("description"),
-  accountId: int("accountId").notNull(),
+  accountId: int("accountId").notNull().references(() => chartOfAccounts.id, { onDelete: "restrict" }),
   debit: decimal("debit", { precision: 15, scale: 2 }).default("0").notNull(),
   credit: decimal("credit", { precision: 15, scale: 2 }).default("0").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
@@ -134,13 +138,13 @@ export type JournalEntry = typeof journalEntries.$inferSelect;
 // ─── Income Statement Lines (manual input) ──────────────────────────
 export const incomeStatementLines = mysqlTable("income_statement_lines", {
   id: int("id").autoincrement().primaryKey(),
-  companyId: int("companyId").notNull(),
-  documentId: int("documentId"),
+  companyId: int("companyId").notNull().references(() => companies.id, { onDelete: "restrict" }),
+  documentId: int("documentId").references(() => documents.id, { onDelete: "set null" }),
   period: varchar("period", { length: 20 }).notNull(), // e.g. "2025-01" or "2025-Q1"
   lineType: mysqlEnum("lineType", ["revenue", "cost_of_goods", "operating_expense", "other_income", "other_expense", "tax"]).notNull(),
   description: varchar("description", { length: 500 }).notNull(),
   amount: decimal("amount", { precision: 15, scale: 2 }).notNull(),
-  accountId: int("accountId"),
+  accountId: int("accountId").references(() => chartOfAccounts.id, { onDelete: "set null" }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
@@ -150,11 +154,11 @@ export type IncomeStatementLine = typeof incomeStatementLines.$inferSelect;
 // ─── Financial Snapshots (generated statements) ─────────────────────
 export const financialSnapshots = mysqlTable("financial_snapshots", {
   id: int("id").autoincrement().primaryKey(),
-  companyId: int("companyId").notNull(),
+  companyId: int("companyId").notNull().references(() => companies.id, { onDelete: "restrict" }),
   statementType: mysqlEnum("statementType", ["profit_loss", "balance_sheet", "cash_flow"]).notNull(),
   period: varchar("period", { length: 20 }).notNull(),
   data: json("data").notNull(), // full statement JSON
-  generatedBy: int("generatedBy").notNull(),
+  generatedBy: int("generatedBy").notNull().references(() => users.id, { onDelete: "restrict" }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
@@ -163,8 +167,8 @@ export type FinancialSnapshot = typeof financialSnapshots.$inferSelect;
 // ─── AI Advisor Conversations ────────────────────────────────────────
 export const advisorConversations = mysqlTable("advisor_conversations", {
   id: int("id").autoincrement().primaryKey(),
-  companyId: int("companyId").notNull(),
-  userId: int("userId").notNull(),
+  companyId: int("companyId").notNull().references(() => companies.id, { onDelete: "cascade" }),
+  userId: int("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
   advisorType: mysqlEnum("advisorType", [
     "bookkeeper", "accountant", "tax_agent", "auditor", "cfo"
   ]).notNull(),
@@ -180,8 +184,8 @@ export type InsertAdvisorConversation = typeof advisorConversations.$inferInsert
 // ─── Admin Audit Logs ───────────────────────────────────────────────
 export const auditLogs = mysqlTable("audit_logs", {
   id: int("id").autoincrement().primaryKey(),
-  userId: int("userId"),
-  companyId: int("companyId"),
+  userId: int("userId").references(() => users.id, { onDelete: "set null" }),
+  companyId: int("companyId").references(() => companies.id, { onDelete: "set null" }),
   action: varchar("action", { length: 100 }).notNull(), // e.g. "document_upload", "transaction_delete", "user_created"
   resourceType: varchar("resourceType", { length: 50 }).notNull(), // e.g. "document", "transaction", "user", "company"
   resourceId: int("resourceId"),
