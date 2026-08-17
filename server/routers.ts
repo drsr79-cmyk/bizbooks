@@ -1000,14 +1000,13 @@ const advisorRouter = router({
     .input(z.object({
       companyId: z.number(),
       advisorType: z.enum(ADVISOR_TYPES),
-      // Narrow allowlist: this value is interpolated into a privileged LLM
-      // system prompt, so newlines/control characters are rejected here.
+      // Narrow allowlist keeps the stored/displayed label safe for UI and logs.
+      // Advisor display names are never sent to the LLM.
       name: z.string().trim().min(1).max(ADVISOR_NAME_MAX_LENGTH).regex(ADVISOR_NAME_PATTERN, ADVISOR_NAME_ERROR),
     }))
     .mutation(async ({ ctx, input }) => {
-      // Owner-only: the name is a company-wide value that lands in every other
-      // member's advisor system prompt, so it follows the same tier as
-      // financial.getSnapshots rather than the any-member read check.
+      // Owner-only: the name is company-wide presentation data, so changing it
+      // follows the same tier as other company-wide settings.
       const role = await db.getMemberRole(input.companyId, ctx.user.id);
       if (role !== "owner") throw new TRPCError({ code: "FORBIDDEN", message: "Only owners can rename advisors" });
 
@@ -1070,14 +1069,27 @@ const advisorRouter = router({
       const convo = await db.getConversationById(input.conversationId);
       if (!convo) throw new TRPCError({ code: "NOT_FOUND" });
 
-      const messages = (convo.messages as any[]) || [];
-      messages.push({ role: "user", content: input.message, timestamp: Date.now() });
-
-      const [txns, incomeLines, docs] = await Promise.all([
+      const [company, txns, incomeLines, docs] = await Promise.all([
+        db.getCompanyById(convo.companyId),
         db.getTransactions(convo.companyId, 50, 0),
         db.getIncomeStatementLines(convo.companyId),
         db.getDocuments(convo.companyId),
       ]);
+
+      // Stored messages are conversation data, not trusted instructions. Drop
+      // every persisted system-role message (including legacy name-interpolated
+      // prompts) and rebuild the fixed persona from server-owned code each time.
+      const systemPrompt = getAdvisorSystemPrompt(
+        convo.advisorType,
+        "",
+        company?.name || "Your Company",
+        company?.companyType || "sdn_bhd"
+      );
+      const messages = [
+        { role: "system", content: systemPrompt, timestamp: Date.now() },
+        ...(((convo.messages as any[]) || []).filter(message => message.role !== "system")),
+        { role: "user", content: input.message, timestamp: Date.now() },
+      ];
 
       const contextMsg = `[CONTEXT - Current financial data for reference]
 Recent transactions (last 50): ${JSON.stringify(txns.slice(0, 20).map(t => ({ date: t.date, desc: t.description, amount: t.amount, type: t.transactionType, category: t.category })))}
