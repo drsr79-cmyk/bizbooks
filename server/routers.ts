@@ -10,6 +10,7 @@ import { invokeLLM } from "./_core/llm";
 import { getAdvisorSystemPrompt } from "./advisorPrompts";
 import { nanoid } from "nanoid";
 import { extractLLMContent, parseLLMJson } from "./llmHelper";
+import { requireCompanyAccess, requireConversationAccess } from "./access";
 
 // ─── Auth Router ─────────────────────────────────────────────────────
 const authRouter = router({
@@ -53,6 +54,7 @@ const companyRouter = router({
   getById: protectedProcedure
     .input(z.object({ id: z.number() }))
     .query(async ({ ctx, input }) => {
+      await requireCompanyAccess(input.id, ctx.user.id);
       const company = await db.getCompanyById(input.id);
       if (!company) throw new TRPCError({ code: "NOT_FOUND", message: "Company not found" });
       return company;
@@ -972,6 +974,7 @@ const advisorRouter = router({
       advisorType: z.string().optional(),
     }))
     .query(async ({ ctx, input }) => {
+      await requireCompanyAccess(input.companyId, ctx.user.id);
       return db.getConversations(input.companyId, ctx.user.id, input.advisorType);
     }),
 
@@ -981,6 +984,7 @@ const advisorRouter = router({
       advisorType: z.enum(["bookkeeper", "accountant", "tax_agent", "auditor", "cfo"]),
     }))
     .mutation(async ({ ctx, input }) => {
+      await requireCompanyAccess(input.companyId, ctx.user.id);
       const company = await db.getCompanyById(input.companyId);
       const systemPrompt = getAdvisorSystemPrompt(
         input.advisorType,
@@ -1004,9 +1008,8 @@ const advisorRouter = router({
       conversationId: z.number(),
       message: z.string(),
     }))
-    .mutation(async ({ input }) => {
-      const convo = await db.getConversationById(input.conversationId);
-      if (!convo) throw new TRPCError({ code: "NOT_FOUND" });
+    .mutation(async ({ ctx, input }) => {
+      const convo = await requireConversationAccess(input.conversationId, ctx.user.id);
 
       const messages = (convo.messages as any[]) || [];
       messages.push({ role: "user", content: input.message, timestamp: Date.now() });
