@@ -38,16 +38,28 @@ export const companiesRelations = relations(companies, ({ one, many }) => ({
   auditLogs: many(auditLogs),
 }));
 
-export const companyMembersRelations = relations(companyMembers, ({ one }) => ({
-  company: one(companies, {
-    fields: [companyMembers.companyId],
-    references: [companies.id],
-  }),
-  user: one(users, {
-    fields: [companyMembers.userId],
-    references: [users.id],
-  }),
-}));
+export const companyMembersRelations = relations(
+  companyMembers,
+  ({ one, many }) => ({
+    company: one(companies, {
+      fields: [companyMembers.companyId],
+      references: [companies.id],
+    }),
+    user: one(users, {
+      fields: [companyMembers.userId],
+      references: [users.id],
+    }),
+    uploadedDocuments: many(documents, {
+      relationName: "documentUploaderMembership",
+    }),
+    generatedFinancialSnapshots: many(financialSnapshots, {
+      relationName: "snapshotGeneratorMembership",
+    }),
+    advisorConversations: many(advisorConversations, {
+      relationName: "advisorOwnerMembership",
+    }),
+  })
+);
 
 export const chartOfAccountsRelations = relations(
   chartOfAccounts,
@@ -57,8 +69,8 @@ export const chartOfAccountsRelations = relations(
       references: [companies.id],
     }),
     parent: one(chartOfAccounts, {
-      fields: [chartOfAccounts.parentId],
-      references: [chartOfAccounts.id],
+      fields: [chartOfAccounts.parentId, chartOfAccounts.companyId],
+      references: [chartOfAccounts.id, chartOfAccounts.companyId],
       relationName: "accountHierarchy",
     }),
     children: many(chartOfAccounts, { relationName: "accountHierarchy" }),
@@ -77,6 +89,11 @@ export const documentsRelations = relations(documents, ({ one, many }) => ({
     fields: [documents.uploadedBy],
     references: [users.id],
   }),
+  uploaderMembership: one(companyMembers, {
+    fields: [documents.companyId, documents.uploadedBy],
+    references: [companyMembers.companyId, companyMembers.userId],
+    relationName: "documentUploaderMembership",
+  }),
   transactions: many(transactions),
   incomeStatementLines: many(incomeStatementLines),
 }));
@@ -89,12 +106,12 @@ export const transactionsRelations = relations(
       references: [companies.id],
     }),
     document: one(documents, {
-      fields: [transactions.documentId],
-      references: [documents.id],
+      fields: [transactions.documentId, transactions.companyId],
+      references: [documents.id, documents.companyId],
     }),
     account: one(chartOfAccounts, {
-      fields: [transactions.accountId],
-      references: [chartOfAccounts.id],
+      fields: [transactions.accountId, transactions.companyId],
+      references: [chartOfAccounts.id, chartOfAccounts.companyId],
     }),
     journalEntries: many(journalEntries),
   })
@@ -106,12 +123,12 @@ export const journalEntriesRelations = relations(journalEntries, ({ one }) => ({
     references: [companies.id],
   }),
   transaction: one(transactions, {
-    fields: [journalEntries.transactionId],
-    references: [transactions.id],
+    fields: [journalEntries.transactionId, journalEntries.companyId],
+    references: [transactions.id, transactions.companyId],
   }),
   account: one(chartOfAccounts, {
-    fields: [journalEntries.accountId],
-    references: [chartOfAccounts.id],
+    fields: [journalEntries.accountId, journalEntries.companyId],
+    references: [chartOfAccounts.id, chartOfAccounts.companyId],
   }),
 }));
 
@@ -123,12 +140,12 @@ export const incomeStatementLinesRelations = relations(
       references: [companies.id],
     }),
     document: one(documents, {
-      fields: [incomeStatementLines.documentId],
-      references: [documents.id],
+      fields: [incomeStatementLines.documentId, incomeStatementLines.companyId],
+      references: [documents.id, documents.companyId],
     }),
     account: one(chartOfAccounts, {
-      fields: [incomeStatementLines.accountId],
-      references: [chartOfAccounts.id],
+      fields: [incomeStatementLines.accountId, incomeStatementLines.companyId],
+      references: [chartOfAccounts.id, chartOfAccounts.companyId],
     }),
   })
 );
@@ -144,6 +161,11 @@ export const financialSnapshotsRelations = relations(
       fields: [financialSnapshots.generatedBy],
       references: [users.id],
     }),
+    generatorMembership: one(companyMembers, {
+      fields: [financialSnapshots.companyId, financialSnapshots.generatedBy],
+      references: [companyMembers.companyId, companyMembers.userId],
+      relationName: "snapshotGeneratorMembership",
+    }),
   })
 );
 
@@ -157,6 +179,11 @@ export const advisorConversationsRelations = relations(
     user: one(users, {
       fields: [advisorConversations.userId],
       references: [users.id],
+    }),
+    ownerMembership: one(companyMembers, {
+      fields: [advisorConversations.companyId, advisorConversations.userId],
+      references: [companyMembers.companyId, companyMembers.userId],
+      relationName: "advisorOwnerMembership",
     }),
   })
 );

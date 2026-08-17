@@ -1,0 +1,25 @@
+ALTER TABLE `chart_of_accounts` ADD CONSTRAINT `chart_of_accounts_id_company_unique` UNIQUE(`id`,`companyId`);--> statement-breakpoint
+ALTER TABLE `company_members` ADD CONSTRAINT `company_members_company_user_unique` UNIQUE(`companyId`,`userId`);--> statement-breakpoint
+ALTER TABLE `documents` ADD CONSTRAINT `documents_id_company_unique` UNIQUE(`id`,`companyId`);--> statement-breakpoint
+ALTER TABLE `transactions` ADD CONSTRAINT `transactions_id_company_unique` UNIQUE(`id`,`companyId`);--> statement-breakpoint
+ALTER TABLE `advisor_conversations` ADD CONSTRAINT `advisor_conversations_owner_membership_fk` FOREIGN KEY (`companyId`,`userId`) REFERENCES `company_members`(`companyId`,`userId`) ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `audit_logs` ADD CONSTRAINT `audit_logs_userId_users_id_fk` FOREIGN KEY (`userId`) REFERENCES `users`(`id`) ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `audit_logs` ADD CONSTRAINT `audit_logs_companyId_companies_id_fk` FOREIGN KEY (`companyId`) REFERENCES `companies`(`id`) ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `chart_of_accounts` ADD CONSTRAINT `chart_of_accounts_companyId_companies_id_fk` FOREIGN KEY (`companyId`) REFERENCES `companies`(`id`) ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `chart_of_accounts` ADD CONSTRAINT `chart_of_accounts_parent_company_fk` FOREIGN KEY (`parentId`,`companyId`) REFERENCES `chart_of_accounts`(`id`,`companyId`) ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `companies` ADD CONSTRAINT `companies_createdBy_users_id_fk` FOREIGN KEY (`createdBy`) REFERENCES `users`(`id`) ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `company_members` ADD CONSTRAINT `company_members_companyId_companies_id_fk` FOREIGN KEY (`companyId`) REFERENCES `companies`(`id`) ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `company_members` ADD CONSTRAINT `company_members_userId_users_id_fk` FOREIGN KEY (`userId`) REFERENCES `users`(`id`) ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `documents` ADD CONSTRAINT `documents_companyId_companies_id_fk` FOREIGN KEY (`companyId`) REFERENCES `companies`(`id`) ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `documents` ADD CONSTRAINT `documents_uploader_membership_fk` FOREIGN KEY (`companyId`,`uploadedBy`) REFERENCES `company_members`(`companyId`,`userId`) ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `financial_snapshots` ADD CONSTRAINT `financial_snapshots_companyId_companies_id_fk` FOREIGN KEY (`companyId`) REFERENCES `companies`(`id`) ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `financial_snapshots` ADD CONSTRAINT `financial_snapshots_generator_membership_fk` FOREIGN KEY (`companyId`,`generatedBy`) REFERENCES `company_members`(`companyId`,`userId`) ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `income_statement_lines` ADD CONSTRAINT `income_statement_lines_companyId_companies_id_fk` FOREIGN KEY (`companyId`) REFERENCES `companies`(`id`) ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `income_statement_lines` ADD CONSTRAINT `income_statement_lines_document_company_fk` FOREIGN KEY (`documentId`,`companyId`) REFERENCES `documents`(`id`,`companyId`) ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `income_statement_lines` ADD CONSTRAINT `income_statement_lines_account_company_fk` FOREIGN KEY (`accountId`,`companyId`) REFERENCES `chart_of_accounts`(`id`,`companyId`) ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `journal_entries` ADD CONSTRAINT `journal_entries_companyId_companies_id_fk` FOREIGN KEY (`companyId`) REFERENCES `companies`(`id`) ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `journal_entries` ADD CONSTRAINT `journal_entries_transaction_company_fk` FOREIGN KEY (`transactionId`,`companyId`) REFERENCES `transactions`(`id`,`companyId`) ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `journal_entries` ADD CONSTRAINT `journal_entries_account_company_fk` FOREIGN KEY (`accountId`,`companyId`) REFERENCES `chart_of_accounts`(`id`,`companyId`) ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `transactions` ADD CONSTRAINT `transactions_companyId_companies_id_fk` FOREIGN KEY (`companyId`) REFERENCES `companies`(`id`) ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `transactions` ADD CONSTRAINT `transactions_document_company_fk` FOREIGN KEY (`documentId`,`companyId`) REFERENCES `documents`(`id`,`companyId`) ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `transactions` ADD CONSTRAINT `transactions_account_company_fk` FOREIGN KEY (`accountId`,`companyId`) REFERENCES `chart_of_accounts`(`id`,`companyId`) ON DELETE restrict ON UPDATE no action;

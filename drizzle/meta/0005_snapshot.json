@@ -1,7 +1,7 @@
 {
   "version": "5",
   "dialect": "mysql",
-  "id": "6d96c4b1-16f0-4f8a-84e7-814d211955ba",
+  "id": "b8644289-577c-4301-9b8e-d29821ac6d3c",
   "prevId": "5919b867-e536-4912-922c-1ebbf7704300",
   "tables": {
     "advisor_conversations": {
@@ -69,28 +69,17 @@
       },
       "indexes": {},
       "foreignKeys": {
-        "advisor_conversations_companyId_companies_id_fk": {
-          "name": "advisor_conversations_companyId_companies_id_fk",
+        "advisor_conversations_owner_membership_fk": {
+          "name": "advisor_conversations_owner_membership_fk",
           "tableFrom": "advisor_conversations",
-          "tableTo": "companies",
+          "tableTo": "company_members",
           "columnsFrom": [
-            "companyId"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "advisor_conversations_userId_users_id_fk": {
-          "name": "advisor_conversations_userId_users_id_fk",
-          "tableFrom": "advisor_conversations",
-          "tableTo": "users",
-          "columnsFrom": [
+            "companyId",
             "userId"
           ],
           "columnsTo": [
-            "id"
+            "companyId",
+            "userId"
           ],
           "onDelete": "cascade",
           "onUpdate": "no action"
@@ -291,7 +280,16 @@
           "default": "(now())"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "chart_of_accounts_id_company_unique": {
+          "name": "chart_of_accounts_id_company_unique",
+          "columns": [
+            "id",
+            "companyId"
+          ],
+          "isUnique": true
+        }
+      },
       "foreignKeys": {
         "chart_of_accounts_companyId_companies_id_fk": {
           "name": "chart_of_accounts_companyId_companies_id_fk",
@@ -306,17 +304,19 @@
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
-        "chart_of_accounts_parentId_chart_of_accounts_id_fk": {
-          "name": "chart_of_accounts_parentId_chart_of_accounts_id_fk",
+        "chart_of_accounts_parent_company_fk": {
+          "name": "chart_of_accounts_parent_company_fk",
           "tableFrom": "chart_of_accounts",
           "tableTo": "chart_of_accounts",
           "columnsFrom": [
-            "parentId"
+            "parentId",
+            "companyId"
           ],
           "columnsTo": [
-            "id"
+            "id",
+            "companyId"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -667,7 +667,16 @@
           "default": "(now())"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "documents_id_company_unique": {
+          "name": "documents_id_company_unique",
+          "columns": [
+            "id",
+            "companyId"
+          ],
+          "isUnique": true
+        }
+      },
       "foreignKeys": {
         "documents_companyId_companies_id_fk": {
           "name": "documents_companyId_companies_id_fk",
@@ -682,15 +691,17 @@
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
-        "documents_uploadedBy_users_id_fk": {
-          "name": "documents_uploadedBy_users_id_fk",
+        "documents_uploader_membership_fk": {
+          "name": "documents_uploader_membership_fk",
           "tableFrom": "documents",
-          "tableTo": "users",
+          "tableTo": "company_members",
           "columnsFrom": [
+            "companyId",
             "uploadedBy"
           ],
           "columnsTo": [
-            "id"
+            "companyId",
+            "userId"
           ],
           "onDelete": "restrict",
           "onUpdate": "no action"
@@ -776,15 +787,17 @@
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
-        "financial_snapshots_generatedBy_users_id_fk": {
-          "name": "financial_snapshots_generatedBy_users_id_fk",
+        "financial_snapshots_generator_membership_fk": {
+          "name": "financial_snapshots_generator_membership_fk",
           "tableFrom": "financial_snapshots",
-          "tableTo": "users",
+          "tableTo": "company_members",
           "columnsFrom": [
+            "companyId",
             "generatedBy"
           ],
           "columnsTo": [
-            "id"
+            "companyId",
+            "userId"
           ],
           "onDelete": "restrict",
           "onUpdate": "no action"
@@ -893,30 +906,34 @@
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
-        "income_statement_lines_documentId_documents_id_fk": {
-          "name": "income_statement_lines_documentId_documents_id_fk",
+        "income_statement_lines_document_company_fk": {
+          "name": "income_statement_lines_document_company_fk",
           "tableFrom": "income_statement_lines",
           "tableTo": "documents",
           "columnsFrom": [
-            "documentId"
+            "documentId",
+            "companyId"
           ],
           "columnsTo": [
-            "id"
+            "id",
+            "companyId"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
-        "income_statement_lines_accountId_chart_of_accounts_id_fk": {
-          "name": "income_statement_lines_accountId_chart_of_accounts_id_fk",
+        "income_statement_lines_account_company_fk": {
+          "name": "income_statement_lines_account_company_fk",
           "tableFrom": "income_statement_lines",
           "tableTo": "chart_of_accounts",
           "columnsFrom": [
-            "accountId"
+            "accountId",
+            "companyId"
           ],
           "columnsTo": [
-            "id"
+            "id",
+            "companyId"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -1016,28 +1033,32 @@
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
-        "journal_entries_transactionId_transactions_id_fk": {
-          "name": "journal_entries_transactionId_transactions_id_fk",
+        "journal_entries_transaction_company_fk": {
+          "name": "journal_entries_transaction_company_fk",
           "tableFrom": "journal_entries",
           "tableTo": "transactions",
           "columnsFrom": [
-            "transactionId"
+            "transactionId",
+            "companyId"
           ],
           "columnsTo": [
-            "id"
+            "id",
+            "companyId"
           ],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
-        "journal_entries_accountId_chart_of_accounts_id_fk": {
-          "name": "journal_entries_accountId_chart_of_accounts_id_fk",
+        "journal_entries_account_company_fk": {
+          "name": "journal_entries_account_company_fk",
           "tableFrom": "journal_entries",
           "tableTo": "chart_of_accounts",
           "columnsFrom": [
-            "accountId"
+            "accountId",
+            "companyId"
           ],
           "columnsTo": [
-            "id"
+            "id",
+            "companyId"
           ],
           "onDelete": "restrict",
           "onUpdate": "no action"
@@ -1234,7 +1255,16 @@
           "default": "(now())"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "transactions_id_company_unique": {
+          "name": "transactions_id_company_unique",
+          "columns": [
+            "id",
+            "companyId"
+          ],
+          "isUnique": true
+        }
+      },
       "foreignKeys": {
         "transactions_companyId_companies_id_fk": {
           "name": "transactions_companyId_companies_id_fk",
@@ -1249,30 +1279,34 @@
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
-        "transactions_documentId_documents_id_fk": {
-          "name": "transactions_documentId_documents_id_fk",
+        "transactions_document_company_fk": {
+          "name": "transactions_document_company_fk",
           "tableFrom": "transactions",
           "tableTo": "documents",
           "columnsFrom": [
-            "documentId"
+            "documentId",
+            "companyId"
           ],
           "columnsTo": [
-            "id"
+            "id",
+            "companyId"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
-        "transactions_accountId_chart_of_accounts_id_fk": {
-          "name": "transactions_accountId_chart_of_accounts_id_fk",
+        "transactions_account_company_fk": {
+          "name": "transactions_account_company_fk",
           "tableFrom": "transactions",
           "tableTo": "chart_of_accounts",
           "columnsFrom": [
-            "accountId"
+            "accountId",
+            "companyId"
           ],
           "columnsTo": [
-            "id"
+            "id",
+            "companyId"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },

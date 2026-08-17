@@ -1,91 +1,261 @@
 import { describe, expect, it } from "vitest";
 import { getTableConfig, type MySqlTable } from "drizzle-orm/mysql-core";
 import {
-  advisorConversations,
-  auditLogs,
-  chartOfAccounts,
-  companies,
-  companyMembers,
-  documents,
-  financialSnapshots,
-  incomeStatementLines,
-  journalEntries,
-  transactions,
-} from "../drizzle/schema";
+  createTableRelationsHelpers,
+  extractTablesRelationalConfig,
+} from "drizzle-orm/relations";
+import * as schema from "../drizzle/schema";
 import * as relationGraph from "../drizzle/relations";
 
-type DeleteAction = "cascade" | "restrict" | "set null";
+type Constraint = {
+  columns: string[];
+  foreignColumns: string[];
+  onDelete: string;
+};
 
-function deleteActions(table: MySqlTable): Record<string, DeleteAction> {
+const constrainedTables: MySqlTable[] = [
+  schema.advisorConversations,
+  schema.auditLogs,
+  schema.chartOfAccounts,
+  schema.companies,
+  schema.companyMembers,
+  schema.documents,
+  schema.financialSnapshots,
+  schema.incomeStatementLines,
+  schema.journalEntries,
+  schema.transactions,
+];
+
+function constraints(): Record<string, Constraint> {
   return Object.fromEntries(
-    getTableConfig(table).foreignKeys.map(foreignKey => {
-      const reference = foreignKey.reference();
-      return [reference.columns[0]!.name, foreignKey.onDelete as DeleteAction];
-    })
+    constrainedTables.flatMap(table =>
+      getTableConfig(table).foreignKeys.map(foreignKey => {
+        const reference = foreignKey.reference();
+        return [
+          foreignKey.getName(),
+          {
+            columns: reference.columns.map(column => column.name),
+            foreignColumns: reference.foreignColumns.map(column => column.name),
+            onDelete: foreignKey.onDelete!,
+          },
+        ];
+      })
+    )
   );
 }
 
 describe("relational schema integrity", () => {
-  it.each([
-    [companies, { createdBy: "restrict" }],
-    [companyMembers, { companyId: "cascade", userId: "cascade" }],
-    [chartOfAccounts, { companyId: "restrict", parentId: "set null" }],
-    [documents, { companyId: "restrict", uploadedBy: "restrict" }],
-    [
-      transactions,
-      { companyId: "restrict", documentId: "set null", accountId: "set null" },
-    ],
-    [
-      journalEntries,
-      {
-        companyId: "restrict",
-        transactionId: "restrict",
-        accountId: "restrict",
+  it("defines every FK with the intended tenant scope and delete policy", () => {
+    expect(constraints()).toEqual({
+      advisor_conversations_owner_membership_fk: {
+        columns: ["companyId", "userId"],
+        foreignColumns: ["companyId", "userId"],
+        onDelete: "cascade",
       },
+      audit_logs_userId_users_id_fk: {
+        columns: ["userId"],
+        foreignColumns: ["id"],
+        onDelete: "set null",
+      },
+      audit_logs_companyId_companies_id_fk: {
+        columns: ["companyId"],
+        foreignColumns: ["id"],
+        onDelete: "set null",
+      },
+      chart_of_accounts_companyId_companies_id_fk: {
+        columns: ["companyId"],
+        foreignColumns: ["id"],
+        onDelete: "restrict",
+      },
+      chart_of_accounts_parent_company_fk: {
+        columns: ["parentId", "companyId"],
+        foreignColumns: ["id", "companyId"],
+        onDelete: "restrict",
+      },
+      companies_createdBy_users_id_fk: {
+        columns: ["createdBy"],
+        foreignColumns: ["id"],
+        onDelete: "restrict",
+      },
+      company_members_companyId_companies_id_fk: {
+        columns: ["companyId"],
+        foreignColumns: ["id"],
+        onDelete: "cascade",
+      },
+      company_members_userId_users_id_fk: {
+        columns: ["userId"],
+        foreignColumns: ["id"],
+        onDelete: "cascade",
+      },
+      documents_companyId_companies_id_fk: {
+        columns: ["companyId"],
+        foreignColumns: ["id"],
+        onDelete: "restrict",
+      },
+      documents_uploader_membership_fk: {
+        columns: ["companyId", "uploadedBy"],
+        foreignColumns: ["companyId", "userId"],
+        onDelete: "restrict",
+      },
+      financial_snapshots_companyId_companies_id_fk: {
+        columns: ["companyId"],
+        foreignColumns: ["id"],
+        onDelete: "restrict",
+      },
+      financial_snapshots_generator_membership_fk: {
+        columns: ["companyId", "generatedBy"],
+        foreignColumns: ["companyId", "userId"],
+        onDelete: "restrict",
+      },
+      income_statement_lines_companyId_companies_id_fk: {
+        columns: ["companyId"],
+        foreignColumns: ["id"],
+        onDelete: "restrict",
+      },
+      income_statement_lines_document_company_fk: {
+        columns: ["documentId", "companyId"],
+        foreignColumns: ["id", "companyId"],
+        onDelete: "restrict",
+      },
+      income_statement_lines_account_company_fk: {
+        columns: ["accountId", "companyId"],
+        foreignColumns: ["id", "companyId"],
+        onDelete: "restrict",
+      },
+      journal_entries_companyId_companies_id_fk: {
+        columns: ["companyId"],
+        foreignColumns: ["id"],
+        onDelete: "restrict",
+      },
+      journal_entries_transaction_company_fk: {
+        columns: ["transactionId", "companyId"],
+        foreignColumns: ["id", "companyId"],
+        onDelete: "restrict",
+      },
+      journal_entries_account_company_fk: {
+        columns: ["accountId", "companyId"],
+        foreignColumns: ["id", "companyId"],
+        onDelete: "restrict",
+      },
+      transactions_companyId_companies_id_fk: {
+        columns: ["companyId"],
+        foreignColumns: ["id"],
+        onDelete: "restrict",
+      },
+      transactions_document_company_fk: {
+        columns: ["documentId", "companyId"],
+        foreignColumns: ["id", "companyId"],
+        onDelete: "restrict",
+      },
+      transactions_account_company_fk: {
+        columns: ["accountId", "companyId"],
+        foreignColumns: ["id", "companyId"],
+        onDelete: "restrict",
+      },
+    });
+  });
+
+  it("defines the membership and composite parent unique indexes", () => {
+    const indexes = [
+      schema.chartOfAccounts,
+      schema.companyMembers,
+      schema.documents,
+      schema.transactions,
+    ].flatMap(table =>
+      getTableConfig(table)
+        .indexes.filter(index => index.config.unique)
+        .map(index => [
+          index.config.name,
+          index.config.columns.map((column: any) => column.name),
+        ])
+    );
+
+    expect(Object.fromEntries(indexes)).toEqual({
+      chart_of_accounts_id_company_unique: ["id", "companyId"],
+      company_members_company_user_unique: ["companyId", "userId"],
+      documents_id_company_unique: ["id", "companyId"],
+      transactions_id_company_unique: ["id", "companyId"],
+    });
+  });
+
+  it.each([
+    [
+      "chartOfAccounts",
+      "parent",
+      ["parentId", "companyId"],
+      ["id", "companyId"],
     ],
     [
-      incomeStatementLines,
-      { companyId: "restrict", documentId: "set null", accountId: "set null" },
+      "documents",
+      "uploaderMembership",
+      ["companyId", "uploadedBy"],
+      ["companyId", "userId"],
     ],
-    [financialSnapshots, { companyId: "restrict", generatedBy: "restrict" }],
-    [advisorConversations, { companyId: "cascade", userId: "cascade" }],
-    [auditLogs, { userId: "set null", companyId: "set null" }],
+    [
+      "transactions",
+      "document",
+      ["documentId", "companyId"],
+      ["id", "companyId"],
+    ],
+    [
+      "transactions",
+      "account",
+      ["accountId", "companyId"],
+      ["id", "companyId"],
+    ],
+    [
+      "journalEntries",
+      "transaction",
+      ["transactionId", "companyId"],
+      ["id", "companyId"],
+    ],
+    [
+      "journalEntries",
+      "account",
+      ["accountId", "companyId"],
+      ["id", "companyId"],
+    ],
+    [
+      "incomeStatementLines",
+      "document",
+      ["documentId", "companyId"],
+      ["id", "companyId"],
+    ],
+    [
+      "incomeStatementLines",
+      "account",
+      ["accountId", "companyId"],
+      ["id", "companyId"],
+    ],
+    [
+      "financialSnapshots",
+      "generatorMembership",
+      ["companyId", "generatedBy"],
+      ["companyId", "userId"],
+    ],
+    [
+      "advisorConversations",
+      "ownerMembership",
+      ["companyId", "userId"],
+      ["companyId", "userId"],
+    ],
   ] as const)(
-    "defines the intended delete policy for %s",
-    (table, expected) => {
-      expect(deleteActions(table)).toEqual(expected);
+    "maps %s.%s through the tenant key",
+    (tableName, relationName, expectedFields, expectedReferences) => {
+      const relationalConfig = extractTablesRelationalConfig(
+        { ...schema, ...relationGraph },
+        createTableRelationsHelpers
+      );
+      const relation = relationalConfig.tables[tableName]!.relations[
+        relationName
+      ] as any;
+
+      expect(relation.config.fields.map((column: any) => column.name)).toEqual(
+        expectedFields
+      );
+      expect(
+        relation.config.references.map((column: any) => column.name)
+      ).toEqual(expectedReferences);
     }
   );
-
-  it("prevents duplicate company memberships", () => {
-    const uniqueIndexes = getTableConfig(companyMembers).indexes.filter(
-      index => index.config.unique
-    );
-
-    expect(uniqueIndexes).toHaveLength(1);
-    expect(uniqueIndexes[0]?.config.name).toBe(
-      "company_members_company_user_unique"
-    );
-    expect(
-      uniqueIndexes[0]?.config.columns.map((column: any) => column.name)
-    ).toEqual(["companyId", "userId"]);
-  });
-
-  it("exports relations for every table participating in the graph", () => {
-    expect(Object.keys(relationGraph).sort()).toEqual(
-      [
-        "advisorConversationsRelations",
-        "auditLogsRelations",
-        "chartOfAccountsRelations",
-        "companiesRelations",
-        "companyMembersRelations",
-        "documentsRelations",
-        "financialSnapshotsRelations",
-        "incomeStatementLinesRelations",
-        "journalEntriesRelations",
-        "transactionsRelations",
-        "usersRelations",
-      ].sort()
-    );
-  });
 });

@@ -1,4 +1,4 @@
-import { int, mysqlEnum, mysqlTable, text, timestamp, varchar, decimal, bigint, json, boolean, uniqueIndex, type AnyMySqlColumn } from "drizzle-orm/mysql-core";
+import { int, mysqlEnum, mysqlTable, text, timestamp, varchar, decimal, bigint, json, boolean, foreignKey, uniqueIndex } from "drizzle-orm/mysql-core";
 
 // ─── Users ───────────────────────────────────────────────────────────
 export const users = mysqlTable("users", {
@@ -58,19 +58,30 @@ export type CompanyMember = typeof companyMembers.$inferSelect;
 export type InsertCompanyMember = typeof companyMembers.$inferInsert;
 
 // ─── Chart of Accounts ──────────────────────────────────────────────
-export const chartOfAccounts = mysqlTable("chart_of_accounts", {
-  id: int("id").autoincrement().primaryKey(),
-  companyId: int("companyId").notNull().references(() => companies.id, { onDelete: "restrict" }),
-  code: varchar("code", { length: 20 }).notNull(),
-  name: varchar("name", { length: 255 }).notNull(),
-  accountType: mysqlEnum("accountType", [
-    "asset", "liability", "equity", "revenue", "expense"
-  ]).notNull(),
-  subType: varchar("subType", { length: 100 }),
-  parentId: int("parentId").references((): AnyMySqlColumn => chartOfAccounts.id, { onDelete: "set null" }),
-  isDefault: boolean("isDefault").default(false).notNull(),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
+export const chartOfAccounts = mysqlTable(
+  "chart_of_accounts",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    companyId: int("companyId").notNull().references(() => companies.id, { onDelete: "restrict" }),
+    code: varchar("code", { length: 20 }).notNull(),
+    name: varchar("name", { length: 255 }).notNull(),
+    accountType: mysqlEnum("accountType", [
+      "asset", "liability", "equity", "revenue", "expense"
+    ]).notNull(),
+    subType: varchar("subType", { length: 100 }),
+    parentId: int("parentId"),
+    isDefault: boolean("isDefault").default(false).notNull(),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  table => [
+    uniqueIndex("chart_of_accounts_id_company_unique").on(table.id, table.companyId),
+    foreignKey({
+      columns: [table.parentId, table.companyId],
+      foreignColumns: [table.id, table.companyId],
+      name: "chart_of_accounts_parent_company_fk",
+    }).onDelete("restrict"),
+  ]
+);
 
 export type ChartOfAccount = typeof chartOfAccounts.$inferSelect;
 
@@ -78,7 +89,7 @@ export type ChartOfAccount = typeof chartOfAccounts.$inferSelect;
 export const documents = mysqlTable("documents", {
   id: int("id").autoincrement().primaryKey(),
   companyId: int("companyId").notNull().references(() => companies.id, { onDelete: "restrict" }),
-  uploadedBy: int("uploadedBy").notNull().references(() => users.id, { onDelete: "restrict" }),
+  uploadedBy: int("uploadedBy").notNull(),
   docType: mysqlEnum("docType", [
     "receipt", "invoice", "bank_statement", "credit_card_statement", "income_statement", "other"
   ]).notNull(),
@@ -92,7 +103,14 @@ export const documents = mysqlTable("documents", {
   clarificationNote: text("clarificationNote"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-});
+}, table => [
+  uniqueIndex("documents_id_company_unique").on(table.id, table.companyId),
+  foreignKey({
+    columns: [table.companyId, table.uploadedBy],
+    foreignColumns: [companyMembers.companyId, companyMembers.userId],
+    name: "documents_uploader_membership_fk",
+  }).onDelete("restrict"),
+]);
 
 export type Document = typeof documents.$inferSelect;
 export type InsertDocument = typeof documents.$inferInsert;
@@ -101,13 +119,13 @@ export type InsertDocument = typeof documents.$inferInsert;
 export const transactions = mysqlTable("transactions", {
   id: int("id").autoincrement().primaryKey(),
   companyId: int("companyId").notNull().references(() => companies.id, { onDelete: "restrict" }),
-  documentId: int("documentId").references(() => documents.id, { onDelete: "set null" }),
+  documentId: int("documentId"),
   date: timestamp("date").notNull(),
   description: text("description").notNull(),
   amount: decimal("amount", { precision: 15, scale: 2 }).notNull(),
   transactionType: mysqlEnum("transactionType", ["debit", "credit"]).notNull(),
   category: varchar("category", { length: 255 }),
-  accountId: int("accountId").references(() => chartOfAccounts.id, { onDelete: "set null" }),
+  accountId: int("accountId"),
   autoCategory: varchar("autoCategory", { length: 255 }),
   autoCategoryConfidence: decimal("autoCategoryConfidence", { precision: 5, scale: 2 }),
   manualOverride: boolean("manualOverride").default(false).notNull(),
@@ -115,7 +133,19 @@ export const transactions = mysqlTable("transactions", {
   reference: varchar("reference", { length: 255 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-});
+}, table => [
+  uniqueIndex("transactions_id_company_unique").on(table.id, table.companyId),
+  foreignKey({
+    columns: [table.documentId, table.companyId],
+    foreignColumns: [documents.id, documents.companyId],
+    name: "transactions_document_company_fk",
+  }).onDelete("restrict"),
+  foreignKey({
+    columns: [table.accountId, table.companyId],
+    foreignColumns: [chartOfAccounts.id, chartOfAccounts.companyId],
+    name: "transactions_account_company_fk",
+  }).onDelete("restrict"),
+]);
 
 export type Transaction = typeof transactions.$inferSelect;
 export type InsertTransaction = typeof transactions.$inferInsert;
@@ -124,14 +154,25 @@ export type InsertTransaction = typeof transactions.$inferInsert;
 export const journalEntries = mysqlTable("journal_entries", {
   id: int("id").autoincrement().primaryKey(),
   companyId: int("companyId").notNull().references(() => companies.id, { onDelete: "restrict" }),
-  transactionId: int("transactionId").references(() => transactions.id, { onDelete: "restrict" }),
+  transactionId: int("transactionId"),
   date: timestamp("date").notNull(),
   description: text("description"),
-  accountId: int("accountId").notNull().references(() => chartOfAccounts.id, { onDelete: "restrict" }),
+  accountId: int("accountId").notNull(),
   debit: decimal("debit", { precision: 15, scale: 2 }).default("0").notNull(),
   credit: decimal("credit", { precision: 15, scale: 2 }).default("0").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
+}, table => [
+  foreignKey({
+    columns: [table.transactionId, table.companyId],
+    foreignColumns: [transactions.id, transactions.companyId],
+    name: "journal_entries_transaction_company_fk",
+  }).onDelete("restrict"),
+  foreignKey({
+    columns: [table.accountId, table.companyId],
+    foreignColumns: [chartOfAccounts.id, chartOfAccounts.companyId],
+    name: "journal_entries_account_company_fk",
+  }).onDelete("restrict"),
+]);
 
 export type JournalEntry = typeof journalEntries.$inferSelect;
 
@@ -139,15 +180,26 @@ export type JournalEntry = typeof journalEntries.$inferSelect;
 export const incomeStatementLines = mysqlTable("income_statement_lines", {
   id: int("id").autoincrement().primaryKey(),
   companyId: int("companyId").notNull().references(() => companies.id, { onDelete: "restrict" }),
-  documentId: int("documentId").references(() => documents.id, { onDelete: "set null" }),
+  documentId: int("documentId"),
   period: varchar("period", { length: 20 }).notNull(), // e.g. "2025-01" or "2025-Q1"
   lineType: mysqlEnum("lineType", ["revenue", "cost_of_goods", "operating_expense", "other_income", "other_expense", "tax"]).notNull(),
   description: varchar("description", { length: 500 }).notNull(),
   amount: decimal("amount", { precision: 15, scale: 2 }).notNull(),
-  accountId: int("accountId").references(() => chartOfAccounts.id, { onDelete: "set null" }),
+  accountId: int("accountId"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-});
+}, table => [
+  foreignKey({
+    columns: [table.documentId, table.companyId],
+    foreignColumns: [documents.id, documents.companyId],
+    name: "income_statement_lines_document_company_fk",
+  }).onDelete("restrict"),
+  foreignKey({
+    columns: [table.accountId, table.companyId],
+    foreignColumns: [chartOfAccounts.id, chartOfAccounts.companyId],
+    name: "income_statement_lines_account_company_fk",
+  }).onDelete("restrict"),
+]);
 
 export type IncomeStatementLine = typeof incomeStatementLines.$inferSelect;
 
@@ -158,17 +210,23 @@ export const financialSnapshots = mysqlTable("financial_snapshots", {
   statementType: mysqlEnum("statementType", ["profit_loss", "balance_sheet", "cash_flow"]).notNull(),
   period: varchar("period", { length: 20 }).notNull(),
   data: json("data").notNull(), // full statement JSON
-  generatedBy: int("generatedBy").notNull().references(() => users.id, { onDelete: "restrict" }),
+  generatedBy: int("generatedBy").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
+}, table => [
+  foreignKey({
+    columns: [table.companyId, table.generatedBy],
+    foreignColumns: [companyMembers.companyId, companyMembers.userId],
+    name: "financial_snapshots_generator_membership_fk",
+  }).onDelete("restrict"),
+]);
 
 export type FinancialSnapshot = typeof financialSnapshots.$inferSelect;
 
 // ─── AI Advisor Conversations ────────────────────────────────────────
 export const advisorConversations = mysqlTable("advisor_conversations", {
   id: int("id").autoincrement().primaryKey(),
-  companyId: int("companyId").notNull().references(() => companies.id, { onDelete: "cascade" }),
-  userId: int("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
+  companyId: int("companyId").notNull(),
+  userId: int("userId").notNull(),
   advisorType: mysqlEnum("advisorType", [
     "bookkeeper", "accountant", "tax_agent", "auditor", "cfo"
   ]).notNull(),
@@ -176,7 +234,13 @@ export const advisorConversations = mysqlTable("advisor_conversations", {
   messages: json("messages").notNull(), // Array of {role, content, timestamp}
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-});
+}, table => [
+  foreignKey({
+    columns: [table.companyId, table.userId],
+    foreignColumns: [companyMembers.companyId, companyMembers.userId],
+    name: "advisor_conversations_owner_membership_fk",
+  }).onDelete("cascade"),
+]);
 
 export type AdvisorConversation = typeof advisorConversations.$inferSelect;
 export type InsertAdvisorConversation = typeof advisorConversations.$inferInsert;
