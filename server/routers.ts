@@ -10,6 +10,13 @@ import { invokeLLM } from "./_core/llm";
 import { getAdvisorSystemPrompt } from "./advisorPrompts";
 import { nanoid } from "nanoid";
 import { extractLLMContent, parseLLMJson } from "./llmHelper";
+import {
+  requireCompanyAccess,
+  requireDocumentAccess,
+  requireIncomeLineAccess,
+  requireMemberAccess,
+  requireTransactionAccess,
+} from "./access";
 
 // ─── Auth Router ─────────────────────────────────────────────────────
 const authRouter = router({
@@ -53,6 +60,7 @@ const companyRouter = router({
   getById: protectedProcedure
     .input(z.object({ id: z.number() }))
     .query(async ({ ctx, input }) => {
+      await requireCompanyAccess(input.id, ctx.user.id);
       const company = await db.getCompanyById(input.id);
       if (!company) throw new TRPCError({ code: "NOT_FOUND", message: "Company not found" });
       return company;
@@ -124,7 +132,9 @@ const companyRouter = router({
       accessLevel: z.enum(["full", "limited"]).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
-      const callerRole = await db.getMemberRole(input.companyId, ctx.user.id);
+      // Authorize against the stored membership row, never the paired companyId.
+      const member = await requireMemberAccess(input.memberId, ctx.user.id);
+      const callerRole = await db.getMemberRole(member.companyId, ctx.user.id);
       if (callerRole !== "owner") throw new TRPCError({ code: "FORBIDDEN", message: "Only owners can update members" });
 
       const updateData: any = {};
@@ -144,7 +154,9 @@ const companyRouter = router({
       companyId: z.number(),
     }))
     .mutation(async ({ ctx, input }) => {
-      const callerRole = await db.getMemberRole(input.companyId, ctx.user.id);
+      // Authorize against the stored membership row, never the paired companyId.
+      const member = await requireMemberAccess(input.memberId, ctx.user.id);
+      const callerRole = await db.getMemberRole(member.companyId, ctx.user.id);
       if (callerRole !== "owner") throw new TRPCError({ code: "FORBIDDEN", message: "Only owners can remove members" });
       await db.removeCompanyMember(input.memberId);
       return { success: true };
@@ -152,7 +164,8 @@ const companyRouter = router({
 
   getChartOfAccounts: protectedProcedure
     .input(z.object({ companyId: z.number() }))
-    .query(async ({ input }) => {
+    .query(async ({ ctx, input }) => {
+      await requireCompanyAccess(input.companyId, ctx.user.id);
       return db.getChartOfAccounts(input.companyId);
     }),
 });
@@ -207,15 +220,14 @@ const documentRouter = router({
 
   getById: protectedProcedure
     .input(z.object({ id: z.number() }))
-    .query(async ({ input }) => {
-      return db.getDocumentById(input.id);
+    .query(async ({ ctx, input }) => {
+      return requireDocumentAccess(input.id, ctx.user.id);
     }),
 
   processWithOCR: protectedProcedure
     .input(z.object({ documentId: z.number() }))
-    .mutation(async ({ input }) => {
-      const doc = await db.getDocumentById(input.documentId);
-      if (!doc) throw new TRPCError({ code: "NOT_FOUND" });
+    .mutation(async ({ ctx, input }) => {
+      const doc = await requireDocumentAccess(input.documentId, ctx.user.id);
 
       await db.updateDocument(doc.id, { status: "processing" });
 
@@ -286,9 +298,8 @@ const documentRouter = router({
       documentId: z.number(),
       response: z.string(),
     }))
-    .mutation(async ({ input }) => {
-      const doc = await db.getDocumentById(input.documentId);
-      if (!doc) throw new TRPCError({ code: "NOT_FOUND" });
+    .mutation(async ({ ctx, input }) => {
+      const doc = await requireDocumentAccess(input.documentId, ctx.user.id);
 
       // Re-process with the user's clarification
       await db.updateDocument(input.documentId, { status: "processing" });
@@ -720,10 +731,9 @@ const transactionRouter = router({
       documentId: z.number(),
       rawText: z.string().optional(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       // Get the document to use its file URL for LLM analysis
-      const doc = await db.getDocumentById(input.documentId);
-      if (!doc) throw new TRPCError({ code: "NOT_FOUND", message: "Document not found" });
+      const doc = await requireDocumentAccess(input.documentId, ctx.user.id);
 
       // Delete any existing transactions for this document before re-categorizing
       await db.deleteTransactionsByDocumentId(input.documentId);
@@ -745,7 +755,8 @@ const transactionRouter = router({
         // Create transactions from extracted statement lines
         const txns = ocrData?.transactions ?? [];
         const txData = txns.map((tx: any) => ({
-          companyId: input.companyId,
+          // Owning company comes from the document, not from client input.
+          companyId: doc.companyId,
           documentId: input.documentId,
           date: tx.date ? new Date(tx.date) : new Date(),
           description: tx.description,
@@ -774,7 +785,10 @@ const transactionRouter = router({
       category: z.string(),
       accountId: z.number().optional(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
+      // No companyId in the input by design: it is derived from the stored row.
+      await requireTransactionAccess(input.transactionId, ctx.user.id);
+
       await db.updateTransaction(input.transactionId, {
         category: input.category,
         accountId: input.accountId,
@@ -793,7 +807,9 @@ const transactionRouter = router({
       category: z.string().optional(),
       notes: z.string().optional(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
+      await requireCompanyAccess(input.companyId, ctx.user.id);
+
       const id = await db.createTransaction({
         companyId: input.companyId,
         date: new Date(input.date),
@@ -810,11 +826,14 @@ const transactionRouter = router({
   delete: protectedProcedure
     .input(z.object({
       transactionId: z.number(),
+      // Retained for client compatibility but deliberately NOT used for
+      // authorization: the previous check passed if the caller belonged to the
+      // companyId they supplied, which let them delete another company's
+      // transaction by pairing their own companyId with a foreign id.
       companyId: z.number(),
     }))
     .mutation(async ({ ctx, input }) => {
-      const role = await db.getMemberRole(input.companyId, ctx.user.id);
-      if (!role) throw new TRPCError({ code: "FORBIDDEN", message: "You do not have access to this company" });
+      await requireTransactionAccess(input.transactionId, ctx.user.id);
       await db.deleteTransaction(input.transactionId);
       return { success: true };
     }),
@@ -857,7 +876,9 @@ const incomeStatementRouter = router({
   deleteLine: protectedProcedure
     .input(z.object({ lineId: z.number(), companyId: z.number() }))
     .mutation(async ({ ctx, input }) => {
-      const role = await db.getMemberRole(input.companyId, ctx.user.id);
+      // Authorize against the stored line, never the paired companyId.
+      const line = await requireIncomeLineAccess(input.lineId, ctx.user.id);
+      const role = await db.getMemberRole(line.companyId, ctx.user.id);
       if (role !== "owner") throw new TRPCError({ code: "FORBIDDEN" });
       await db.deleteIncomeStatementLine(input.lineId);
       return { success: true };
@@ -1055,6 +1076,9 @@ const staffRouter = router({
   summary: protectedProcedure
     .input(z.object({ companyId: z.number() }))
     .query(async ({ ctx, input }) => {
+      // Own-document counts are user-scoped, but the expense/income totals and
+      // category breakdown are computed across the whole company.
+      await requireCompanyAccess(input.companyId, ctx.user.id);
       return db.getStaffInputSummary(input.companyId, ctx.user.id);
     }),
 });

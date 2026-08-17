@@ -216,6 +216,13 @@ export async function getTransactions(companyId: number, limit = 100, offset = 0
     .limit(limit).offset(offset);
 }
 
+export async function getTransactionById(id: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(transactions).where(eq(transactions.id, id)).limit(1);
+  return result[0];
+}
+
 export async function updateTransaction(id: number, data: Partial<InsertTransaction>) {
   const db = await getDb();
   if (!db) return;
@@ -238,6 +245,15 @@ export async function getIncomeStatementLines(companyId: number, period?: string
       .where(and(eq(incomeStatementLines.companyId, companyId), eq(incomeStatementLines.period, period)));
   }
   return db.select().from(incomeStatementLines).where(eq(incomeStatementLines.companyId, companyId));
+}
+
+export async function getIncomeStatementLineById(id: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(incomeStatementLines)
+    .where(eq(incomeStatementLines.id, id))
+    .limit(1);
+  return result[0];
 }
 
 export async function deleteIncomeStatementLine(id: number) {
@@ -368,6 +384,15 @@ export async function getUserByEmail(email: string) {
   const db = await getDb();
   if (!db) return undefined;
   const result = await db.select().from(users).where(eq(users.email, email)).limit(1);
+  return result[0];
+}
+
+export async function getCompanyMemberById(memberId: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(companyMembers)
+    .where(eq(companyMembers.id, memberId))
+    .limit(1);
   return result[0];
 }
 
