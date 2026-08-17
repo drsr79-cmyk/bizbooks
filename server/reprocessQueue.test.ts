@@ -1,51 +1,56 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  BoundedTaskQueue,
   DEFAULT_REPROCESS_CONCURRENCY,
   getReprocessConcurrency,
   MAX_REPROCESS_CONCURRENCY,
-  runWithConcurrencyLimit,
 } from "./reprocessQueue";
 
-describe("runWithConcurrencyLimit", () => {
-  it("never exceeds the configured concurrency for a large backlog", async () => {
-    const documents = Array.from({ length: 15 }, (_, id) => ({ id }));
+describe("BoundedTaskQueue", () => {
+  it("shares one concurrency bound across overlapping batches", async () => {
+    const queue = new BoundedTaskQueue(3);
     let active = 0;
     let maxActive = 0;
-    const processed: number[] = [];
 
-    const processDocument = vi.fn(async (document: { id: number }) => {
+    const processDocument = vi.fn(async () => {
       active++;
       maxActive = Math.max(maxActive, active);
       await new Promise(resolve => setTimeout(resolve, 5));
-      processed.push(document.id);
       active--;
     });
 
-    await runWithConcurrencyLimit(documents, 3, processDocument);
+    const enqueueBatch = () =>
+      Promise.all(
+        Array.from({ length: 15 }, () => queue.enqueue(processDocument))
+      );
 
-    expect(processDocument).toHaveBeenCalledTimes(15);
-    expect(processed).toHaveLength(15);
+    await Promise.all([enqueueBatch(), enqueueBatch()]);
+
+    expect(processDocument).toHaveBeenCalledTimes(30);
     expect(maxActive).toBe(3);
   });
 
   it("uses fewer workers when the backlog is smaller than the limit", async () => {
+    const queue = new BoundedTaskQueue(5);
     let active = 0;
     let maxActive = 0;
 
-    await runWithConcurrencyLimit([1, 2], 5, async () => {
-      active++;
-      maxActive = Math.max(maxActive, active);
-      await new Promise(resolve => setTimeout(resolve, 2));
-      active--;
-    });
+    await Promise.all(
+      [1, 2].map(() =>
+        queue.enqueue(async () => {
+          active++;
+          maxActive = Math.max(maxActive, active);
+          await new Promise(resolve => setTimeout(resolve, 2));
+          active--;
+        })
+      )
+    );
 
     expect(maxActive).toBe(2);
   });
 
-  it("rejects an invalid concurrency instead of running unbounded", async () => {
-    await expect(
-      runWithConcurrencyLimit([1], 0, async () => {})
-    ).rejects.toThrow("positive integer");
+  it("rejects an invalid concurrency instead of running unbounded", () => {
+    expect(() => new BoundedTaskQueue(0)).toThrow("positive integer");
   });
 });
 

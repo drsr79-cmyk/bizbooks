@@ -14,24 +14,49 @@ export function getReprocessConcurrency(
   return Math.min(parsed, MAX_REPROCESS_CONCURRENCY);
 }
 
-export async function runWithConcurrencyLimit<T>(
-  items: readonly T[],
-  concurrency: number,
-  processItem: (item: T, index: number) => Promise<void>
-): Promise<void> {
-  if (!Number.isInteger(concurrency) || concurrency < 1) {
-    throw new RangeError("Concurrency must be a positive integer");
+type PendingTask<T> = {
+  run: () => Promise<T>;
+  resolve: (value: T) => void;
+  reject: (error: unknown) => void;
+};
+
+export class BoundedTaskQueue {
+  private activeCount = 0;
+  private readonly pending: PendingTask<unknown>[] = [];
+
+  constructor(readonly concurrency: number) {
+    if (!Number.isInteger(concurrency) || concurrency < 1) {
+      throw new RangeError("Concurrency must be a positive integer");
+    }
   }
 
-  let nextIndex = 0;
-  const workerCount = Math.min(concurrency, items.length);
+  enqueue<T>(task: () => Promise<T>): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      this.pending.push({
+        run: task,
+        resolve: resolve as (value: unknown) => void,
+        reject,
+      });
+      this.drain();
+    });
+  }
 
-  const worker = async () => {
-    while (nextIndex < items.length) {
-      const index = nextIndex++;
-      await processItem(items[index]!, index);
+  private drain() {
+    while (this.activeCount < this.concurrency && this.pending.length > 0) {
+      const task = this.pending.shift()!;
+      this.activeCount++;
+
+      void Promise.resolve()
+        .then(task.run)
+        .then(task.resolve, task.reject)
+        .finally(() => {
+          this.activeCount--;
+          this.drain();
+        });
     }
-  };
-
-  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  }
 }
+
+// One scheduler for the entire Node.js process. Every reprocessAll request and
+// company shares this budget, so overlapping requests cannot multiply the cap.
+export const reprocessQueue = new BoundedTaskQueue(getReprocessConcurrency());

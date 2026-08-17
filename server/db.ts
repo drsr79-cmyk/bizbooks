@@ -1,4 +1,4 @@
-import { eq, and, desc, sql } from "drizzle-orm";
+import { eq, and, desc, isNull, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 
 import {
@@ -190,6 +190,27 @@ export async function updateDocument(id: number, data: Partial<InsertDocument>) 
   const db = await getDb();
   if (!db) return;
   await db.update(documents).set(data).where(eq(documents.id, id));
+}
+
+export async function claimDocumentForReprocessing(id: number) {
+  const db = await getDb();
+  if (!db) return false;
+
+  const result = await db
+    .update(documents)
+    .set({ status: "processing" })
+    .where(
+      and(
+        eq(documents.id, id),
+        or(
+          eq(documents.status, "error"),
+          eq(documents.status, "pending"),
+          and(eq(documents.status, "processed"), isNull(documents.ocrData))
+        )
+      )
+    );
+
+  return result[0].affectedRows === 1;
 }
 
 // ─── Transactions ───────────────────────────────────────────────────
