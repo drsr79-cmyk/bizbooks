@@ -247,6 +247,15 @@ export async function getIncomeStatementLines(companyId: number, period?: string
   return db.select().from(incomeStatementLines).where(eq(incomeStatementLines.companyId, companyId));
 }
 
+export async function getIncomeStatementLineById(id: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(incomeStatementLines)
+    .where(eq(incomeStatementLines.id, id))
+    .limit(1);
+  return result[0];
+}
+
 export async function deleteIncomeStatementLine(id: number) {
   const db = await getDb();
   if (!db) return;
@@ -375,6 +384,15 @@ export async function getUserByEmail(email: string) {
   const db = await getDb();
   if (!db) return undefined;
   const result = await db.select().from(users).where(eq(users.email, email)).limit(1);
+  return result[0];
+}
+
+export async function getCompanyMemberById(memberId: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(companyMembers)
+    .where(eq(companyMembers.id, memberId))
+    .limit(1);
   return result[0];
 }
 

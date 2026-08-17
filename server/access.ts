@@ -62,3 +62,26 @@ export async function requireTransactionAccess(
   await requireCompanyAccess(txn.companyId, userId);
   return txn;
 }
+
+/** Load a membership row and authorize against its stored company. */
+export async function requireMemberAccess(memberId: number, userId: number) {
+  const member = await db.getCompanyMemberById(memberId);
+  if (!member) {
+    throw new TRPCError({ code: "NOT_FOUND", message: "Member not found" });
+  }
+  await requireCompanyAccess(member.companyId, userId);
+  return member;
+}
+
+/** Load an income-statement line and authorize against its stored company. */
+export async function requireIncomeLineAccess(lineId: number, userId: number) {
+  const line = await db.getIncomeStatementLineById(lineId);
+  if (!line) {
+    throw new TRPCError({
+      code: "NOT_FOUND",
+      message: "Income statement line not found",
+    });
+  }
+  await requireCompanyAccess(line.companyId, userId);
+  return line;
+}

@@ -13,6 +13,8 @@ import { extractLLMContent, parseLLMJson } from "./llmHelper";
 import {
   requireCompanyAccess,
   requireDocumentAccess,
+  requireIncomeLineAccess,
+  requireMemberAccess,
   requireTransactionAccess,
 } from "./access";
 
@@ -130,7 +132,9 @@ const companyRouter = router({
       accessLevel: z.enum(["full", "limited"]).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
-      const callerRole = await db.getMemberRole(input.companyId, ctx.user.id);
+      // Authorize against the stored membership row, never the paired companyId.
+      const member = await requireMemberAccess(input.memberId, ctx.user.id);
+      const callerRole = await db.getMemberRole(member.companyId, ctx.user.id);
       if (callerRole !== "owner") throw new TRPCError({ code: "FORBIDDEN", message: "Only owners can update members" });
 
       const updateData: any = {};
@@ -150,7 +154,9 @@ const companyRouter = router({
       companyId: z.number(),
     }))
     .mutation(async ({ ctx, input }) => {
-      const callerRole = await db.getMemberRole(input.companyId, ctx.user.id);
+      // Authorize against the stored membership row, never the paired companyId.
+      const member = await requireMemberAccess(input.memberId, ctx.user.id);
+      const callerRole = await db.getMemberRole(member.companyId, ctx.user.id);
       if (callerRole !== "owner") throw new TRPCError({ code: "FORBIDDEN", message: "Only owners can remove members" });
       await db.removeCompanyMember(input.memberId);
       return { success: true };
@@ -870,7 +876,9 @@ const incomeStatementRouter = router({
   deleteLine: protectedProcedure
     .input(z.object({ lineId: z.number(), companyId: z.number() }))
     .mutation(async ({ ctx, input }) => {
-      const role = await db.getMemberRole(input.companyId, ctx.user.id);
+      // Authorize against the stored line, never the paired companyId.
+      const line = await requireIncomeLineAccess(input.lineId, ctx.user.id);
+      const role = await db.getMemberRole(line.companyId, ctx.user.id);
       if (role !== "owner") throw new TRPCError({ code: "FORBIDDEN" });
       await db.deleteIncomeStatementLine(input.lineId);
       return { success: true };
