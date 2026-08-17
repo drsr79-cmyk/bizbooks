@@ -10,6 +10,9 @@ import { invokeLLM } from "./_core/llm";
 import { getAdvisorSystemPrompt } from "./advisorPrompts";
 import { nanoid } from "nanoid";
 import { extractLLMContent, parseLLMJson } from "./llmHelper";
+import { getReprocessConcurrency, runWithConcurrencyLimit } from "./reprocessQueue";
+
+const REPROCESS_CONCURRENCY = getReprocessConcurrency();
 
 // ─── Auth Router ─────────────────────────────────────────────────────
 const authRouter = router({
@@ -366,16 +369,21 @@ const documentRouter = router({
         (d.status === "processed" && !d.ocrData)
       );
 
-      let reprocessed = 0;
       for (const doc of failedDocs) {
         await db.updateDocument(doc.id, { status: "processing" });
-        processDocumentAsync(doc.id, doc.fileUrl, doc.docType, doc.fileName, doc.companyId, doc.mimeType ?? "application/octet-stream").catch(err => {
-          console.error(`[ReprocessAll] Error for doc ${doc.id}:`, err.message);
-        });
-        reprocessed++;
       }
 
-      return { reprocessed, total: failedDocs.length };
+      void runWithConcurrencyLimit(failedDocs, REPROCESS_CONCURRENCY, async doc => {
+        try {
+          await processDocumentAsync(doc.id, doc.fileUrl, doc.docType, doc.fileName, doc.companyId, doc.mimeType ?? "application/octet-stream");
+        } catch (err: any) {
+          console.error(`[ReprocessAll] Error for doc ${doc.id}:`, err.message);
+        }
+      }).catch(err => {
+        console.error("[ReprocessAll] Queue failed:", err);
+      });
+
+      return { reprocessed: failedDocs.length, total: failedDocs.length };
     }),
 });
 
