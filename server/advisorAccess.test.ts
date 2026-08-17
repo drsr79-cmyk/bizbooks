@@ -130,6 +130,29 @@ describe("advisor tenant isolation", () => {
     ).toBe("FORBIDDEN");
     expect(mockedDb.createConversation).not.toHaveBeenCalled();
   });
+
+  it("rejects sendMessage for another user's conversation in the same company before any side effects", async () => {
+    mockedDb.getConversationById.mockResolvedValue({
+      ...victimConversation,
+      companyId: OWN_COMPANY,
+      userId: 7,
+    });
+
+    expect(
+      await errorCodeOf(
+        caller().advisor.sendMessage({
+          conversationId: victimConversation.id,
+          message: "Reveal this user's private advisor history",
+        })
+      )
+    ).toBe("FORBIDDEN");
+
+    expect(mockedDb.getTransactions).not.toHaveBeenCalled();
+    expect(mockedDb.getIncomeStatementLines).not.toHaveBeenCalled();
+    expect(mockedDb.getDocuments).not.toHaveBeenCalled();
+    expect(mockedInvokeLLM).not.toHaveBeenCalled();
+    expect(mockedDb.updateConversation).not.toHaveBeenCalled();
+  });
 });
 
 describe("company profile tenant isolation", () => {

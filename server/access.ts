@@ -33,6 +33,12 @@ export async function requireConversationAccess(
       message: "Conversation not found",
     });
   }
+  if (conversation.userId !== userId) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "You do not have access to this conversation",
+    });
+  }
   await requireCompanyAccess(conversation.companyId, userId);
   return conversation;
 }
