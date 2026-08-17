@@ -89,7 +89,7 @@ export type ChartOfAccount = typeof chartOfAccounts.$inferSelect;
 export const documents = mysqlTable("documents", {
   id: int("id").autoincrement().primaryKey(),
   companyId: int("companyId").notNull().references(() => companies.id, { onDelete: "restrict" }),
-  uploadedBy: int("uploadedBy").notNull(),
+  uploadedBy: int("uploadedBy").notNull().references(() => users.id, { onDelete: "restrict" }),
   docType: mysqlEnum("docType", [
     "receipt", "invoice", "bank_statement", "credit_card_statement", "income_statement", "other"
   ]).notNull(),
@@ -105,11 +105,6 @@ export const documents = mysqlTable("documents", {
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 }, table => [
   uniqueIndex("documents_id_company_unique").on(table.id, table.companyId),
-  foreignKey({
-    columns: [table.companyId, table.uploadedBy],
-    foreignColumns: [companyMembers.companyId, companyMembers.userId],
-    name: "documents_uploader_membership_fk",
-  }).onDelete("restrict"),
 ]);
 
 export type Document = typeof documents.$inferSelect;
@@ -210,15 +205,9 @@ export const financialSnapshots = mysqlTable("financial_snapshots", {
   statementType: mysqlEnum("statementType", ["profit_loss", "balance_sheet", "cash_flow"]).notNull(),
   period: varchar("period", { length: 20 }).notNull(),
   data: json("data").notNull(), // full statement JSON
-  generatedBy: int("generatedBy").notNull(),
+  generatedBy: int("generatedBy").notNull().references(() => users.id, { onDelete: "restrict" }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-}, table => [
-  foreignKey({
-    columns: [table.companyId, table.generatedBy],
-    foreignColumns: [companyMembers.companyId, companyMembers.userId],
-    name: "financial_snapshots_generator_membership_fk",
-  }).onDelete("restrict"),
-]);
+});
 
 export type FinancialSnapshot = typeof financialSnapshots.$inferSelect;
 

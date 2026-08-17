@@ -1,7 +1,7 @@
 {
   "version": "5",
   "dialect": "mysql",
-  "id": "b8644289-577c-4301-9b8e-d29821ac6d3c",
+  "id": "04125709-1478-41d4-8bf0-d7c396a45f27",
   "prevId": "5919b867-e536-4912-922c-1ebbf7704300",
   "tables": {
     "advisor_conversations": {
@@ -691,17 +691,15 @@
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
-        "documents_uploader_membership_fk": {
-          "name": "documents_uploader_membership_fk",
+        "documents_uploadedBy_users_id_fk": {
+          "name": "documents_uploadedBy_users_id_fk",
           "tableFrom": "documents",
-          "tableTo": "company_members",
+          "tableTo": "users",
           "columnsFrom": [
-            "companyId",
             "uploadedBy"
           ],
           "columnsTo": [
-            "companyId",
-            "userId"
+            "id"
           ],
           "onDelete": "restrict",
           "onUpdate": "no action"
@@ -787,17 +785,15 @@
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
-        "financial_snapshots_generator_membership_fk": {
-          "name": "financial_snapshots_generator_membership_fk",
+        "financial_snapshots_generatedBy_users_id_fk": {
+          "name": "financial_snapshots_generatedBy_users_id_fk",
           "tableFrom": "financial_snapshots",
-          "tableTo": "company_members",
+          "tableTo": "users",
           "columnsFrom": [
-            "companyId",
             "generatedBy"
           ],
           "columnsTo": [
-            "companyId",
-            "userId"
+            "id"
           ],
           "onDelete": "restrict",
           "onUpdate": "no action"

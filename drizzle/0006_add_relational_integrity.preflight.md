@@ -1,9 +1,15 @@
-# Migration 0005 pre-flight
+# Migration 0006 pre-flight
 
-Migration `0005_add_relational_integrity.sql` is intentionally additive: it
+Migration `0006_add_relational_integrity.sql` is intentionally additive: it
 does not delete orphaned data or choose which duplicate membership to keep.
 Run the checks below against the target database and resolve every non-zero
 result before applying the migration.
+
+This migration was generated on a parallel branch from `main`. Its exact
+snapshot `prevId` and journal position must be regenerated at merge time after
+the final ordering of the other schema PRs is known. The `0006` filename only
+reserves an unclaimed number; it does not pretend the eventual migration graph
+can be known from this branch in isolation.
 
 Take a backup first. Adding the unique constraint will fail while duplicate
 `(companyId, userId)` pairs exist:
@@ -44,9 +50,8 @@ FROM documents child LEFT JOIN companies parent ON parent.id = child.companyId
 WHERE parent.id IS NULL
 UNION ALL
 SELECT 'documents.uploadedBy', COUNT(*)
-FROM documents child LEFT JOIN company_members parent
-  ON parent.companyId = child.companyId AND parent.userId = child.uploadedBy
-WHERE parent.userId IS NULL
+FROM documents child LEFT JOIN users parent ON parent.id = child.uploadedBy
+WHERE parent.id IS NULL
 UNION ALL
 SELECT 'transactions.companyId', COUNT(*)
 FROM transactions child LEFT JOIN companies parent ON parent.id = child.companyId
@@ -95,9 +100,8 @@ FROM financial_snapshots child LEFT JOIN companies parent ON parent.id = child.c
 WHERE parent.id IS NULL
 UNION ALL
 SELECT 'financial_snapshots.generatedBy', COUNT(*)
-FROM financial_snapshots child LEFT JOIN company_members parent
-  ON parent.companyId = child.companyId AND parent.userId = child.generatedBy
-WHERE parent.userId IS NULL
+FROM financial_snapshots child LEFT JOIN users parent ON parent.id = child.generatedBy
+WHERE parent.id IS NULL
 UNION ALL
 SELECT 'advisor_conversations.ownerMembership', COUNT(*)
 FROM advisor_conversations child LEFT JOIN company_members parent
@@ -144,9 +148,9 @@ WHERE tc.CONSTRAINT_SCHEMA = DATABASE()
     'company_members_companyId_companies_id_fk',
     'company_members_userId_users_id_fk',
     'documents_companyId_companies_id_fk',
-    'documents_uploader_membership_fk',
+    'documents_uploadedBy_users_id_fk',
     'financial_snapshots_companyId_companies_id_fk',
-    'financial_snapshots_generator_membership_fk',
+    'financial_snapshots_generatedBy_users_id_fk',
     'income_statement_lines_companyId_companies_id_fk',
     'income_statement_lines_document_company_fk',
     'income_statement_lines_account_company_fk',
@@ -172,7 +176,7 @@ WHERE TABLE_SCHEMA = DATABASE()
 GROUP BY TABLE_NAME, INDEX_NAME;
 ```
 
-Use `0005_add_relational_integrity.rollback.sql` as a reviewed reverse-order
+Use `0006_add_relational_integrity.rollback.sql` as a reviewed reverse-order
 rollback checklist. For a partial migration, execute only the `DROP` statements
 whose constraint/index is present in the inspection results. Then re-run both
 pre-flight queries and apply the migration from the beginning.
@@ -186,9 +190,10 @@ SELECT * FROM `__drizzle_migrations` ORDER BY `created_at` DESC;
 Drizzle normally writes the journal row only after the complete SQL file
 succeeds, so a partially applied migration should have no row. If an operator
 manually registered this migration, remove only the row whose `hash` matches
-the SHA-256 of the exact `0005_add_relational_integrity.sql` being rolled back
-(`fd9b5586f323738be305966acc5b74bdcd5f5edf79cb383f01c846593aa46ffc`
-for the committed file); verify the hash locally before using it in a `DELETE`;
+the SHA-256 of the exact `0006_add_relational_integrity.sql` being rolled back;
+the committed file hashes to
+`b0792c3cf3f273da30cedea56a68dfce9a8f1d9cd8e50252594583ad46d4ded8`.
+Verify the hash locally before using it in a `DELETE`;
 never delete the latest journal row based on ordering alone. After rollback,
 verify the constraints are absent and the matching journal row is absent before
 retrying.

@@ -92,9 +92,9 @@ describe("relational schema integrity", () => {
         foreignColumns: ["id"],
         onDelete: "restrict",
       },
-      documents_uploader_membership_fk: {
-        columns: ["companyId", "uploadedBy"],
-        foreignColumns: ["companyId", "userId"],
+      documents_uploadedBy_users_id_fk: {
+        columns: ["uploadedBy"],
+        foreignColumns: ["id"],
         onDelete: "restrict",
       },
       financial_snapshots_companyId_companies_id_fk: {
@@ -102,9 +102,9 @@ describe("relational schema integrity", () => {
         foreignColumns: ["id"],
         onDelete: "restrict",
       },
-      financial_snapshots_generator_membership_fk: {
-        columns: ["companyId", "generatedBy"],
-        foreignColumns: ["companyId", "userId"],
+      financial_snapshots_generatedBy_users_id_fk: {
+        columns: ["generatedBy"],
+        foreignColumns: ["id"],
         onDelete: "restrict",
       },
       income_statement_lines_companyId_companies_id_fk: {
@@ -186,12 +186,6 @@ describe("relational schema integrity", () => {
       ["id", "companyId"],
     ],
     [
-      "documents",
-      "uploaderMembership",
-      ["companyId", "uploadedBy"],
-      ["companyId", "userId"],
-    ],
-    [
       "transactions",
       "document",
       ["documentId", "companyId"],
@@ -226,12 +220,6 @@ describe("relational schema integrity", () => {
       "account",
       ["accountId", "companyId"],
       ["id", "companyId"],
-    ],
-    [
-      "financialSnapshots",
-      "generatorMembership",
-      ["companyId", "generatedBy"],
-      ["companyId", "userId"],
     ],
     [
       "advisorConversations",

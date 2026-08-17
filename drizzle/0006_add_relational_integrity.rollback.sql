@@ -1,6 +1,6 @@
 -- MySQL DDL auto-commits. For a partial migration, inspect information_schema
 -- first and execute only the lines for constraints/indexes that are present.
--- The order below is the reverse of 0005_add_relational_integrity.sql.
+-- The order below is the reverse of 0006_add_relational_integrity.sql.
 
 ALTER TABLE `transactions` DROP FOREIGN KEY `transactions_account_company_fk`;
 ALTER TABLE `transactions` DROP FOREIGN KEY `transactions_document_company_fk`;
@@ -11,9 +11,9 @@ ALTER TABLE `journal_entries` DROP FOREIGN KEY `journal_entries_companyId_compan
 ALTER TABLE `income_statement_lines` DROP FOREIGN KEY `income_statement_lines_account_company_fk`;
 ALTER TABLE `income_statement_lines` DROP FOREIGN KEY `income_statement_lines_document_company_fk`;
 ALTER TABLE `income_statement_lines` DROP FOREIGN KEY `income_statement_lines_companyId_companies_id_fk`;
-ALTER TABLE `financial_snapshots` DROP FOREIGN KEY `financial_snapshots_generator_membership_fk`;
+ALTER TABLE `financial_snapshots` DROP FOREIGN KEY `financial_snapshots_generatedBy_users_id_fk`;
 ALTER TABLE `financial_snapshots` DROP FOREIGN KEY `financial_snapshots_companyId_companies_id_fk`;
-ALTER TABLE `documents` DROP FOREIGN KEY `documents_uploader_membership_fk`;
+ALTER TABLE `documents` DROP FOREIGN KEY `documents_uploadedBy_users_id_fk`;
 ALTER TABLE `documents` DROP FOREIGN KEY `documents_companyId_companies_id_fk`;
 ALTER TABLE `company_members` DROP FOREIGN KEY `company_members_userId_users_id_fk`;
 ALTER TABLE `company_members` DROP FOREIGN KEY `company_members_companyId_companies_id_fk`;

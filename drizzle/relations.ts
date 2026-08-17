@@ -49,12 +49,6 @@ export const companyMembersRelations = relations(
       fields: [companyMembers.userId],
       references: [users.id],
     }),
-    uploadedDocuments: many(documents, {
-      relationName: "documentUploaderMembership",
-    }),
-    generatedFinancialSnapshots: many(financialSnapshots, {
-      relationName: "snapshotGeneratorMembership",
-    }),
     advisorConversations: many(advisorConversations, {
       relationName: "advisorOwnerMembership",
     }),
@@ -88,11 +82,6 @@ export const documentsRelations = relations(documents, ({ one, many }) => ({
   uploader: one(users, {
     fields: [documents.uploadedBy],
     references: [users.id],
-  }),
-  uploaderMembership: one(companyMembers, {
-    fields: [documents.companyId, documents.uploadedBy],
-    references: [companyMembers.companyId, companyMembers.userId],
-    relationName: "documentUploaderMembership",
   }),
   transactions: many(transactions),
   incomeStatementLines: many(incomeStatementLines),
@@ -160,11 +149,6 @@ export const financialSnapshotsRelations = relations(
     generator: one(users, {
       fields: [financialSnapshots.generatedBy],
       references: [users.id],
-    }),
-    generatorMembership: one(companyMembers, {
-      fields: [financialSnapshots.companyId, financialSnapshots.generatedBy],
-      references: [companyMembers.companyId, companyMembers.userId],
-      relationName: "snapshotGeneratorMembership",
     }),
   })
 );
