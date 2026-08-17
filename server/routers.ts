@@ -169,13 +169,13 @@ const documentRouter = router({
     .input(z.object({
       companyId: z.number(),
       docType: z.enum(["receipt", "invoice", "bank_statement", "credit_card_statement", "income_statement", "other"]),
-      fileName: z.string(),
+      fileName: z.string().min(1).max(255, "Filename must be 255 characters or fewer"),
       fileBase64: z.string()
         .max(MAX_UPLOAD_BASE64_LENGTH, "File exceeds the 25 MiB upload limit")
         .refine(value => getBase64DecodedSize(value) <= MAX_UPLOAD_BYTES, {
           message: "File exceeds the 25 MiB upload limit",
         }),
-      mimeType: z.string(),
+      mimeType: z.string().min(1).max(100, "MIME type must be 100 characters or fewer"),
     }))
     .mutation(async ({ ctx, input }) => {
       const role = await db.getMemberRole(input.companyId, ctx.user.id);
@@ -392,7 +392,8 @@ const documentRouter = router({
 
 // ─── Bookkeeper Clarification Formatter ─────────────────────────────
 function formatBookkeeperClarification(issues: string[], fileName: string): string {
-  const intro = `Hi there! I'm Sarah, your bookkeeper. I've been going through "${fileName}" and I need a bit of help to make sure everything is recorded correctly.\n\n`;
+  const safeFileName = sanitizeFileName(fileName);
+  const intro = `Hi there! I'm Sarah, your bookkeeper. I've been going through "${safeFileName}" and I need a bit of help to make sure everything is recorded correctly.\n\n`;
   const questions = issues.map((issue, i) => `${i + 1}. ${issue}`).join("\n");
   const outro = "\n\nCould you please clarify these for me? I want to make sure your books are spot-on! 📋";
   return intro + questions + outro;
@@ -400,9 +401,10 @@ function formatBookkeeperClarification(issues: string[], fileName: string): stri
 
 // ─── Auto-categorization helper (fire-and-forget) ───────────────────
 async function extractDocumentData(fileUrl: string, docType: string, fileName: string, mimeType: string) {
+  const safeFileName = sanitizeFileName(fileName);
   const isImage = mimeType.startsWith("image/");
   const isPdf = mimeType === "application/pdf";
-  const isText = mimeType.startsWith("text/") || mimeType === "application/csv" || fileName.endsWith(".csv") || fileName.endsWith(".txt");
+  const isText = mimeType.startsWith("text/") || mimeType === "application/csv" || safeFileName.endsWith(".csv") || safeFileName.endsWith(".txt");
 
   const systemPrompt = `You are Sarah, a Senior Bookkeeper and OCR/document analysis expert for Malaysian businesses. Extract all text and structured data from the uploaded document. You are meticulous and thorough.
 
@@ -425,7 +427,7 @@ IMPORTANT RULES:
     messages.push({
       role: "user",
       content: [
-        { type: "text", text: `Please extract and categorize this ${docType} document: ${fileName}` },
+        { type: "text", text: `Please extract and categorize this ${docType} document: ${safeFileName}` },
         { type: "image_url", image_url: { url: fileUrl, detail: "high" } }
       ]
     });
@@ -433,7 +435,7 @@ IMPORTANT RULES:
     messages.push({
       role: "user",
       content: [
-        { type: "text", text: `Please extract and categorize this ${docType} document: ${fileName}` },
+        { type: "text", text: `Please extract and categorize this ${docType} document: ${safeFileName}` },
         { type: "file_url", file_url: { url: fileUrl, mime_type: "application/pdf" } }
       ]
     });
@@ -448,7 +450,7 @@ IMPORTANT RULES:
     }
     messages.push({
       role: "user",
-      content: `Please extract and categorize this ${docType} document: ${fileName}\n\nFile content:\n${textContent.slice(0, 15000)}`
+      content: `Please extract and categorize this ${docType} document: ${safeFileName}\n\nFile content:\n${textContent.slice(0, 15000)}`
     });
   }
 
@@ -515,7 +517,7 @@ IMPORTANT RULES:
   if (parsed) {
     console.log(`[extractDocumentData] Success: txns=${parsed.transactions?.length ?? 0}, vendor=${parsed.vendor ?? 'N/A'}`);
   } else {
-    console.error(`[extractDocumentData] Failed to parse LLM response for ${fileName}`);
+    console.error(`[extractDocumentData] Failed to parse LLM response for ${safeFileName}`);
   }
   return parsed;
 }
@@ -628,15 +630,16 @@ Now provide the complete, corrected analysis in the same JSON format. If you sti
 
 async function processDocumentAsync(docId: number, fileUrl: string, docType: string, fileName: string, companyId: number, mimeType: string) {
   const MAX_RETRIES = 2;
+  const safeFileName = sanitizeFileName(fileName);
   let ocrData: any = null;
   
   try {
-    console.log(`[AutoCategorize] Processing doc ${docId}: ${fileName} (${mimeType})`);
+    console.log(`[AutoCategorize] Processing doc ${docId}: ${safeFileName} (${mimeType})`);
     
     // Retry up to MAX_RETRIES times if extraction returns null
     for (let attempt = 1; attempt <= MAX_RETRIES + 1; attempt++) {
       try {
-        ocrData = await extractDocumentData(fileUrl, docType, fileName, mimeType);
+        ocrData = await extractDocumentData(fileUrl, docType, safeFileName, mimeType);
         if (ocrData) break;
         console.warn(`[AutoCategorize] Attempt ${attempt}/${MAX_RETRIES + 1} returned null for doc ${docId}`);
         if (attempt <= MAX_RETRIES) {
@@ -667,7 +670,7 @@ async function processDocumentAsync(docId: number, fileUrl: string, docType: str
       ocrData: ocrData,
       status: needsClarification ? "needs_clarification" : "processed",
       clarificationNote: needsClarification
-        ? formatBookkeeperClarification(ocrData.clarificationNeeded, fileName)
+        ? formatBookkeeperClarification(ocrData.clarificationNeeded, safeFileName)
         : null,
     });
 
@@ -677,7 +680,7 @@ async function processDocumentAsync(docId: number, fileUrl: string, docType: str
         companyId,
         documentId: docId,
         date: ocrData.date ? new Date(ocrData.date) : new Date(),
-        description: ocrData.vendor || fileName,
+        description: ocrData.vendor || safeFileName,
         amount: ocrData.total.toFixed(2),
         transactionType: docType === "invoice" ? "credit" : "debit",
         category: ocrData.suggestedCategory || (docType === "receipt" ? "Miscellaneous Expenses" : "Sales Revenue"),

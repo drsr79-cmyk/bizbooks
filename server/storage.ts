@@ -53,15 +53,15 @@ export function normalizeKey(relKey: string): string {
     .replace(/\\/g, "/")
     .split("/")
     .filter(segment => segment !== "" && segment !== "." && segment !== "..")
-    .map(segment => segment.replace(/\.\./g, "_"))
+    .map(sanitizeFileName)
     .join("/");
 }
 
 export function sanitizeFileName(fileName: string): string {
   const sanitized = fileName
-    .replace(/[\\/]/g, "_")
+    .replace(/[^A-Za-z0-9._ -]/g, "_")
     .replace(/\.\./g, "_")
-    .replace(/[\u0000-\u001f\u007f]/g, "_");
+    .replace(/^\.+$/, "_");
   return sanitized || "file";
 }
 

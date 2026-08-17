@@ -109,7 +109,16 @@ describe("document upload security", () => {
     expect(mockedDb.createDocument).not.toHaveBeenCalled();
   });
 
-  it.each(["../../evil.txt", "/etc/cron.d/evil", String.raw`..\..\evil.txt`])(
+  it.each([
+    "../../evil.txt",
+    "/etc/cron.d/evil",
+    String.raw`..\..\evil.txt`,
+    "%2e%2e%2f%2e%2e%2fevil.txt",
+    "%2E%2e%2F..%5cevil.txt",
+    "%252e%252e%252f%252e%252e%252fevil.txt",
+    "．．／．．／evil.txt",
+    "%2e%2e/..%2Fevil.txt",
+  ])(
     "keeps a malicious filename inside the company directory: %s",
     async fileName => {
       await caller().document.upload({
@@ -121,7 +130,7 @@ describe("document upload security", () => {
       });
 
       const storageKey = mockedStoragePut.mock.calls[0]?.[0];
-      expect(storageKey).toMatch(/^docs\/7\/[^/\\]+$/);
+      expect(storageKey).toMatch(/^docs\/7\/[A-Za-z0-9._ -]+$/);
       expect(storageKey).not.toContain("..");
       expect(mockedDb.createDocument).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -129,6 +138,31 @@ describe("document upload security", () => {
           fileKey: storageKey,
         })
       );
+    }
+  );
+
+  it.each([
+    ["fileName", "a".repeat(256), "text/plain", "255"],
+    ["mimeType", "document.txt", "a".repeat(101), "100"],
+  ])(
+    "rejects an overlength %s before storage or database work",
+    async (_field, fileName, mimeType, expectedLimit) => {
+      await expect(
+        caller().document.upload({
+          companyId: COMPANY_ID,
+          docType: "other",
+          fileName,
+          fileBase64: Buffer.from("safe content").toString("base64"),
+          mimeType,
+        })
+      ).rejects.toMatchObject({
+        code: "BAD_REQUEST",
+        message: expect.stringContaining(expectedLimit),
+      });
+
+      expect(mockedDb.getMemberRole).not.toHaveBeenCalled();
+      expect(mockedStoragePut).not.toHaveBeenCalled();
+      expect(mockedDb.createDocument).not.toHaveBeenCalled();
     }
   );
 
