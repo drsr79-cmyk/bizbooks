@@ -5,7 +5,13 @@ import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import * as db from "./db";
-import { storagePut } from "./storage";
+import {
+  getBase64DecodedSize,
+  MAX_UPLOAD_BASE64_LENGTH,
+  MAX_UPLOAD_BYTES,
+  sanitizeFileName,
+  storagePut,
+} from "./storage";
 import { invokeLLM } from "./_core/llm";
 import { getAdvisorSystemPrompt } from "./advisorPrompts";
 import { nanoid } from "nanoid";
@@ -164,7 +170,11 @@ const documentRouter = router({
       companyId: z.number(),
       docType: z.enum(["receipt", "invoice", "bank_statement", "credit_card_statement", "income_statement", "other"]),
       fileName: z.string(),
-      fileBase64: z.string(),
+      fileBase64: z.string()
+        .max(MAX_UPLOAD_BASE64_LENGTH, "File exceeds the 25 MiB upload limit")
+        .refine(value => getBase64DecodedSize(value) <= MAX_UPLOAD_BYTES, {
+          message: "File exceeds the 25 MiB upload limit",
+        }),
       mimeType: z.string(),
     }))
     .mutation(async ({ ctx, input }) => {
@@ -172,7 +182,8 @@ const documentRouter = router({
       if (!role) throw new TRPCError({ code: "FORBIDDEN", message: "You do not have access to this company" });
 
       const fileBuffer = Buffer.from(input.fileBase64, "base64");
-      const fileKey = `docs/${input.companyId}/${nanoid()}-${input.fileName}`;
+      const safeFileName = sanitizeFileName(input.fileName);
+      const fileKey = `docs/${input.companyId}/${nanoid()}-${safeFileName}`;
       const { url } = await storagePut(fileKey, fileBuffer, input.mimeType);
 
       const docId = await db.createDocument({
