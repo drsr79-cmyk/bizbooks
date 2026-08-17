@@ -29,6 +29,13 @@
       "when": 1779976584888,
       "tag": "0003_amazing_maggott",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1786926905326,
+      "tag": "0006_add_relational_integrity",
+      "breakpoints": true
     }
   ]
 }
