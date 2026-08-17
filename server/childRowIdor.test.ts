@@ -124,6 +124,53 @@ describe("child-row procedures reject paired-company IDORs", () => {
   });
 });
 
+describe("target-company role controls child-row mutations", () => {
+  beforeEach(() => {
+    mockedDb.getMemberRole.mockImplementation(async companyId => {
+      if (companyId === OWN_COMPANY) return "owner";
+      if (companyId === VICTIM_COMPANY) return "staff";
+      return null;
+    });
+  });
+
+  it("blocks updateMember when the caller is only target-company staff", async () => {
+    expect(
+      await errorCodeOf(
+        caller().company.updateMember({
+          companyId: OWN_COMPANY,
+          memberId: member.id,
+          accessLevel: "full",
+        })
+      )
+    ).toBe("FORBIDDEN");
+    expect(mockedDb.updateCompanyMember).not.toHaveBeenCalled();
+  });
+
+  it("blocks removeMember when the caller is only target-company staff", async () => {
+    expect(
+      await errorCodeOf(
+        caller().company.removeMember({
+          companyId: OWN_COMPANY,
+          memberId: member.id,
+        })
+      )
+    ).toBe("FORBIDDEN");
+    expect(mockedDb.removeCompanyMember).not.toHaveBeenCalled();
+  });
+
+  it("blocks deleteLine when the caller is only target-company staff", async () => {
+    expect(
+      await errorCodeOf(
+        caller().incomeStatement.deleteLine({
+          companyId: OWN_COMPANY,
+          lineId: incomeLine.id,
+        })
+      )
+    ).toBe("FORBIDDEN");
+    expect(mockedDb.deleteIncomeStatementLine).not.toHaveBeenCalled();
+  });
+});
+
 describe("same-company child-row mutations are unaffected", () => {
   beforeEach(() => {
     mockedDb.getCompanyMemberById.mockResolvedValue({
