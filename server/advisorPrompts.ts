@@ -1,5 +1,18 @@
 import type { AdvisorType } from "@shared/types";
 
+const PROMPT_DATE_PATTERN = /Current date context: \d{4}-\d{2}-\d{2}\./;
+
+/** Compare persisted and current prompts without expiring history at midnight. */
+export function isCurrentAdvisorSystemPrompt(
+  storedPrompt: unknown,
+  currentPrompt: string
+): boolean {
+  if (typeof storedPrompt !== "string") return false;
+  const normalizeDate = (prompt: string) =>
+    prompt.replace(PROMPT_DATE_PATTERN, "Current date context: <date>.");
+  return normalizeDate(storedPrompt) === normalizeDate(currentPrompt);
+}
+
 /**
  * Build an advisor's system prompt.
  * Advisor display names are deliberately not included here. They are

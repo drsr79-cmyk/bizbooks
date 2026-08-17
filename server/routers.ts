@@ -7,7 +7,7 @@ import { TRPCError } from "@trpc/server";
 import * as db from "./db";
 import { storagePut } from "./storage";
 import { invokeLLM } from "./_core/llm";
-import { getAdvisorSystemPrompt } from "./advisorPrompts";
+import { getAdvisorSystemPrompt, isCurrentAdvisorSystemPrompt } from "./advisorPrompts";
 import { nanoid } from "nanoid";
 import { extractLLMContent, parseLLMJson } from "./llmHelper";
 import { ADVISOR_NAME_ERROR, ADVISOR_NAME_MAX_LENGTH, ADVISOR_NAME_PATTERN, ADVISOR_TYPES, resolveAdvisorName } from "@shared/types";
@@ -1076,18 +1076,26 @@ const advisorRouter = router({
         db.getDocuments(convo.companyId),
       ]);
 
-      // Stored messages are conversation data, not trusted instructions. Drop
-      // every persisted system-role message (including legacy name-interpolated
-      // prompts) and rebuild the fixed persona from server-owned code each time.
+      // Stored messages are conversation data, not trusted instructions. Rebuild
+      // the persona from server-owned code each time; if the stored persona is
+      // legacy or tampered, discard its entire potentially poisoned history.
       const systemPrompt = getAdvisorSystemPrompt(
         convo.advisorType,
         "",
         company?.name || "Your Company",
         company?.companyType || "sdn_bhd"
       );
+      const storedMessages = (convo.messages as any[]) || [];
+      const storedSystemMessages = storedMessages.filter(message => message.role === "system");
+      const hasCurrentSystemPrompt =
+        storedSystemMessages.length === 1 &&
+        isCurrentAdvisorSystemPrompt(storedSystemMessages[0]?.content, systemPrompt);
+      const safeHistory = hasCurrentSystemPrompt
+        ? storedMessages.filter(message => message.role !== "system")
+        : [];
       const messages = [
         { role: "system", content: systemPrompt, timestamp: Date.now() },
-        ...(((convo.messages as any[]) || []).filter(message => message.role !== "system")),
+        ...safeHistory,
         { role: "user", content: input.message, timestamp: Date.now() },
       ];
 
