@@ -1,9 +1,12 @@
 // Preconfigured storage helpers for Manus WebDev templates
 // Uses the Biz-provided storage proxy (Authorization: Bearer <token>)
 
-import { ENV } from './_core/env';
+import { ENV } from "./_core/env";
 
 type StorageConfig = { baseUrl: string; apiKey: string };
+
+export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+export const MAX_UPLOAD_BASE64_LENGTH = Math.ceil(MAX_UPLOAD_BYTES / 3) * 4;
 
 function getStorageConfig(): StorageConfig {
   const baseUrl = ENV.forgeApiUrl;
@@ -45,8 +48,26 @@ function ensureTrailingSlash(value: string): string {
   return value.endsWith("/") ? value : `${value}/`;
 }
 
-function normalizeKey(relKey: string): string {
-  return relKey.replace(/^\/+/, "");
+export function normalizeKey(relKey: string): string {
+  return relKey
+    .replace(/\\/g, "/")
+    .split("/")
+    .filter(segment => segment !== "" && segment !== "." && segment !== "..")
+    .map(segment => segment.replace(/\.\./g, "_"))
+    .join("/");
+}
+
+export function sanitizeFileName(fileName: string): string {
+  const sanitized = fileName
+    .replace(/[\\/]/g, "_")
+    .replace(/\.\./g, "_")
+    .replace(/[\u0000-\u001f\u007f]/g, "_");
+  return sanitized || "file";
+}
+
+export function getBase64DecodedSize(value: string): number {
+  const padding = value.endsWith("==") ? 2 : value.endsWith("=") ? 1 : 0;
+  return Math.floor((value.length * 3) / 4) - padding;
 }
 
 function toFormData(
@@ -92,7 +113,9 @@ export async function storagePut(
   return { key, url };
 }
 
-export async function storageGet(relKey: string): Promise<{ key: string; url: string; }> {
+export async function storageGet(
+  relKey: string
+): Promise<{ key: string; url: string }> {
   const { baseUrl, apiKey } = getStorageConfig();
   const key = normalizeKey(relKey);
   return {
