@@ -10,6 +10,8 @@ import { invokeLLM } from "./_core/llm";
 import { getAdvisorSystemPrompt } from "./advisorPrompts";
 import { nanoid } from "nanoid";
 import { extractLLMContent, parseLLMJson } from "./llmHelper";
+import { ADVISOR_NAME_ERROR, ADVISOR_NAME_MAX_LENGTH, ADVISOR_NAME_PATTERN, ADVISOR_TYPES, resolveAdvisorName } from "@shared/types";
+import type { AdvisorType } from "@shared/types";
 
 // ─── Auth Router ─────────────────────────────────────────────────────
 const authRouter = router({
@@ -965,7 +967,58 @@ const financialRouter = router({
 });
 
 // ─── Advisor Router ─────────────────────────────────────────────────
+
+/** Build an AdvisorType -> custom name map from stored overrides. */
+function toAdvisorNameMap(
+  overrides: { advisorType: AdvisorType; name: string }[]
+): Partial<Record<AdvisorType, string>> {
+  const map: Partial<Record<AdvisorType, string>> = {};
+  for (const override of overrides) {
+    map[override.advisorType] = override.name;
+  }
+  return map;
+}
+
 const advisorRouter = router({
+  /** Advisor profiles with per-company name overrides merged over the defaults. */
+  profiles: protectedProcedure
+    .input(z.object({ companyId: z.number() }))
+    .query(async ({ ctx, input }) => {
+      const role = await db.getMemberRole(input.companyId, ctx.user.id);
+      if (!role) throw new TRPCError({ code: "FORBIDDEN", message: "You do not have access to this company" });
+
+      const overrides = toAdvisorNameMap(await db.getAdvisorNameOverrides(input.companyId));
+
+      return ADVISOR_TYPES.map(advisorType => ({
+        advisorType,
+        name: resolveAdvisorName(advisorType, overrides),
+        isCustomName: Boolean(overrides[advisorType]),
+      }));
+    }),
+
+  setName: protectedProcedure
+    .input(z.object({
+      companyId: z.number(),
+      advisorType: z.enum(ADVISOR_TYPES),
+      // Narrow allowlist keeps the stored/displayed label safe for UI and logs.
+      // Advisor display names are never sent to the LLM.
+      name: z.string().trim().min(1).max(ADVISOR_NAME_MAX_LENGTH).regex(ADVISOR_NAME_PATTERN, ADVISOR_NAME_ERROR),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      // Owner-only: the name is company-wide presentation data, so changing it
+      // follows the same tier as other company-wide settings.
+      const role = await db.getMemberRole(input.companyId, ctx.user.id);
+      if (role !== "owner") throw new TRPCError({ code: "FORBIDDEN", message: "Only owners can rename advisors" });
+
+      await db.setAdvisorNameOverride({
+        companyId: input.companyId,
+        advisorType: input.advisorType,
+        name: input.name,
+      });
+
+      return { success: true, name: input.name };
+    }),
+
   listConversations: protectedProcedure
     .input(z.object({
       companyId: z.number(),
@@ -978,12 +1031,20 @@ const advisorRouter = router({
   startConversation: protectedProcedure
     .input(z.object({
       companyId: z.number(),
-      advisorType: z.enum(["bookkeeper", "accountant", "tax_agent", "auditor", "cfo"]),
+      advisorType: z.enum(ADVISOR_TYPES),
     }))
     .mutation(async ({ ctx, input }) => {
-      const company = await db.getCompanyById(input.companyId);
+      const role = await db.getMemberRole(input.companyId, ctx.user.id);
+      if (!role) throw new TRPCError({ code: "FORBIDDEN", message: "You do not have access to this company" });
+
+      const [company, overrides] = await Promise.all([
+        db.getCompanyById(input.companyId),
+        db.getAdvisorNameOverrides(input.companyId),
+      ]);
+
       const systemPrompt = getAdvisorSystemPrompt(
         input.advisorType,
+        resolveAdvisorName(input.advisorType, toAdvisorNameMap(overrides)),
         company?.name || "Your Company",
         company?.companyType || "sdn_bhd"
       );
@@ -1008,14 +1069,27 @@ const advisorRouter = router({
       const convo = await db.getConversationById(input.conversationId);
       if (!convo) throw new TRPCError({ code: "NOT_FOUND" });
 
-      const messages = (convo.messages as any[]) || [];
-      messages.push({ role: "user", content: input.message, timestamp: Date.now() });
-
-      const [txns, incomeLines, docs] = await Promise.all([
+      const [company, txns, incomeLines, docs] = await Promise.all([
+        db.getCompanyById(convo.companyId),
         db.getTransactions(convo.companyId, 50, 0),
         db.getIncomeStatementLines(convo.companyId),
         db.getDocuments(convo.companyId),
       ]);
+
+      // Stored messages are conversation data, not trusted instructions. Drop
+      // every persisted system-role message (including legacy name-interpolated
+      // prompts) and rebuild the fixed persona from server-owned code each time.
+      const systemPrompt = getAdvisorSystemPrompt(
+        convo.advisorType,
+        "",
+        company?.name || "Your Company",
+        company?.companyType || "sdn_bhd"
+      );
+      const messages = [
+        { role: "system", content: systemPrompt, timestamp: Date.now() },
+        ...(((convo.messages as any[]) || []).filter(message => message.role !== "system")),
+        { role: "user", content: input.message, timestamp: Date.now() },
+      ];
 
       const contextMsg = `[CONTEXT - Current financial data for reference]
 Recent transactions (last 50): ${JSON.stringify(txns.slice(0, 20).map(t => ({ date: t.date, desc: t.description, amount: t.amount, type: t.transactionType, category: t.category })))}

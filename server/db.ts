@@ -12,6 +12,7 @@ import {
   incomeStatementLines,
   financialSnapshots,
   advisorConversations, InsertAdvisorConversation,
+  advisorNameOverrides, InsertAdvisorNameOverride,
   auditLogs, InsertAuditLog,
   systemMetrics, InsertSystemMetric,
 } from "../drizzle/schema";
@@ -315,6 +316,19 @@ export async function updateConversation(id: number, data: { messages?: any; tit
   const db = await getDb();
   if (!db) return;
   await db.update(advisorConversations).set(data).where(eq(advisorConversations.id, id));
+}
+
+// ─── Advisor Name Overrides ─────────────────────────────────────────
+export async function getAdvisorNameOverrides(companyId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(advisorNameOverrides).where(eq(advisorNameOverrides.companyId, companyId));
+}
+
+export async function setAdvisorNameOverride(data: InsertAdvisorNameOverride) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db.insert(advisorNameOverrides).values(data).onDuplicateKeyUpdate({ set: { name: data.name } });
 }
 
 // ─── Role-based access helpers ──────────────────────────────────────
