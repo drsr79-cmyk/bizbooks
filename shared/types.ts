@@ -6,9 +6,20 @@
 export type * from "../drizzle/schema";
 export * from "./_core/errors";
 
-export type AdvisorType = "bookkeeper" | "accountant" | "tax_agent" | "auditor" | "cfo";
+export type AdvisorType =
+  | "bookkeeper"
+  | "accountant"
+  | "tax_agent"
+  | "auditor"
+  | "cfo";
 
-export const ADVISOR_TYPES = ["bookkeeper", "accountant", "tax_agent", "auditor", "cfo"] as const satisfies readonly AdvisorType[];
+export const ADVISOR_TYPES = [
+  "bookkeeper",
+  "accountant",
+  "tax_agent",
+  "auditor",
+  "cfo",
+] as const satisfies readonly AdvisorType[];
 
 /** Max length of a custom advisor name. Mirrors advisor_name_overrides.name. */
 export const ADVISOR_NAME_MAX_LENGTH = 40;
@@ -16,12 +27,10 @@ export const ADVISOR_NAME_MAX_LENGTH = 40;
 /**
  * Allowed shape of a custom advisor name.
  *
- * The name is interpolated into a privileged LLM system prompt, so this is a
- * deliberately narrow allowlist rather than a denylist. Newlines, tabs and
- * control characters are rejected outright: those are what would let a stored
- * value break out of its sentence and pose as a separate instruction line.
- * Structural characters used to fake prompt scaffolding (`:`, quotes, braces,
- * brackets, backticks) are excluded for the same reason.
+ * This is a deliberately narrow allowlist for names stored and rendered by the
+ * application. Newlines, tabs, control characters, and structural punctuation
+ * are rejected so names remain safe in UI and logs. Advisor names are display
+ * data and are never included in the LLM's privileged system prompt.
  *
  * Unicode-aware (\p{L}/\p{M}) so non-Latin scripts and Malaysian naming
  * conventions still work — e.g. "Nurul 'Ain", "Abdul Rahman bin Ahmad",
@@ -48,45 +57,53 @@ export const COMPANY_TYPE_LABELS: Record<CompanyType, string> = {
   bhd: "Bhd (Berhad)",
 };
 
-export const ADVISOR_PROFILES: Record<AdvisorType, {
-  name: string;
-  title: string;
-  description: string;
-  avatar: string;
-  color: string;
-}> = {
+export const ADVISOR_PROFILES: Record<
+  AdvisorType,
+  {
+    name: string;
+    title: string;
+    description: string;
+    avatar: string;
+    color: string;
+  }
+> = {
   bookkeeper: {
     name: "Sarah",
     title: "Senior Bookkeeper",
-    description: "Meticulous and detail-oriented. Helps with daily entries, reconciliation, and keeping your books tidy.",
+    description:
+      "Meticulous and detail-oriented. Helps with daily entries, reconciliation, and keeping your books tidy.",
     avatar: "S",
     color: "#0d9488",
   },
   accountant: {
     name: "David",
     title: "Chartered Accountant",
-    description: "Analytical and thorough. Reviews your financial records, ensures compliance, and prepares accurate reports.",
+    description:
+      "Analytical and thorough. Reviews your financial records, ensures compliance, and prepares accurate reports.",
     avatar: "D",
     color: "#2563eb",
   },
   tax_agent: {
     name: "Amir",
     title: "Licensed Tax Agent",
-    description: "Sharp and up-to-date with LHDN regulations. Optimises your tax position and ensures timely compliance.",
+    description:
+      "Sharp and up-to-date with LHDN regulations. Optimises your tax position and ensures timely compliance.",
     avatar: "A",
     color: "#7c3aed",
   },
   auditor: {
     name: "Rachel",
     title: "Internal Auditor",
-    description: "Independent and rigorous. Conducts thorough reviews of your financial statements and internal controls.",
+    description:
+      "Independent and rigorous. Conducts thorough reviews of your financial statements and internal controls.",
     avatar: "R",
     color: "#dc2626",
   },
   cfo: {
     name: "James",
     title: "Chief Financial Officer",
-    description: "Strategic and forward-thinking. Provides proactive financial advice and optimisation strategies.",
+    description:
+      "Strategic and forward-thinking. Provides proactive financial advice and optimisation strategies.",
     avatar: "J",
     color: "#ca8a04",
   },
@@ -104,9 +121,8 @@ export function resolveAdvisorName(
   const override = overrides?.[advisorType]?.trim();
   if (!override) return ADVISOR_PROFILES[advisorType].name;
 
-  // Defence in depth: this value ends up inside a privileged system prompt, so
-  // re-check it at the point of use rather than trusting that it was validated
-  // on the way in (rows predating validation, direct DB writes, future callers).
+  // Re-check at the point of use rather than trusting that it was validated on
+  // the way in (rows predating validation, direct DB writes, future callers).
   if (
     override.length > ADVISOR_NAME_MAX_LENGTH ||
     !ADVISOR_NAME_PATTERN.test(override)
