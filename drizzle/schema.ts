@@ -1,4 +1,4 @@
-import { int, mysqlEnum, mysqlTable, text, timestamp, varchar, decimal, bigint, json, boolean } from "drizzle-orm/mysql-core";
+import { int, mysqlEnum, mysqlTable, text, timestamp, unique, varchar, decimal, bigint, json, boolean } from "drizzle-orm/mysql-core";
 
 // ─── Users ───────────────────────────────────────────────────────────
 export const users = mysqlTable("users", {
@@ -176,6 +176,31 @@ export const advisorConversations = mysqlTable("advisor_conversations", {
 
 export type AdvisorConversation = typeof advisorConversations.$inferSelect;
 export type InsertAdvisorConversation = typeof advisorConversations.$inferInsert;
+
+// ─── Advisor Name Overrides (per-company custom advisor names) ──────
+export const advisorNameOverrides = mysqlTable(
+  "advisor_name_overrides",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    companyId: int("companyId").notNull(),
+    advisorType: mysqlEnum("advisorType", [
+      "bookkeeper", "accountant", "tax_agent", "auditor", "cfo"
+    ]).notNull(),
+    name: varchar("name", { length: 40 }).notNull(),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  table => [
+    // One override per advisor per company; enables upsert via onDuplicateKeyUpdate.
+    unique("advisor_name_overrides_company_advisor").on(
+      table.companyId,
+      table.advisorType
+    ),
+  ]
+);
+
+export type AdvisorNameOverride = typeof advisorNameOverrides.$inferSelect;
+export type InsertAdvisorNameOverride = typeof advisorNameOverrides.$inferInsert;
 
 // ─── Admin Audit Logs ───────────────────────────────────────────────
 export const auditLogs = mysqlTable("audit_logs", {
